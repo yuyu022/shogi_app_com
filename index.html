@@ -195,7 +195,6 @@ body{
         <button onclick="speakHands()">持ち駒を読み上げ</button>
       </div>
 
-      <!-- ★AI強さボタン（5段階） -->
       <div id="aiLevelRow">
         <button id="aiBtn1" onclick="setAILevel(1)">弱い</button>
         <button id="aiBtn2" onclick="setAILevel(2)">普通</button>
@@ -240,29 +239,23 @@ let selectedHand=null;
 
 let speechRate = 1.0;
 const RATE_NORMAL = 1.0;
-const RATE_FAST =1.8;
+const RATE_FAST = 1.8;
 
 let lastMove = null;
 
-// リセット二度押し確認
 let resetPending = false;
-// 戻す二度押し確認
 let undoPending = false;
 
-/* 戻す用（最大1回） */
 let undoAvailable = true;
 let undoSnapshot = null;
 
-/* 移動/捕獲/打ち の「確認タップ」状態 */
 let confirmAction = null;
-
-/* 成り確認（同じ移動先をもう一度タップで「成る」） */
 let promotionPending = null;
 
-/* ========= ★CPU設定（A案：軽量） ========= */
-let vsAI = true;          // 後手＝CPU
-let aiLevel = 2;          // 1〜5
-let aiThinking = false;   // 多重実行防止
+/* ========= CPU設定 ========= */
+let vsAI = true;
+let aiLevel = 2;
+let aiThinking = false;
 
 function setAILevel(lv){
   aiLevel = lv;
@@ -278,7 +271,7 @@ function setAILevel(lv){
 /* ========= ユーティリティ ========= */
 function deepCopy(obj){ return JSON.parse(JSON.stringify(obj)); }
 
-/* ====== 駒表現の拡張（! を付けると「この駒は今後成れない」） ====== */
+/* ====== 駒表現（! = 今後成れない） ====== */
 function stripMeta(p){ return p ? p.replace(/!/g,"") : p; }
 function hasNoPromoteFlag(p){ return !!(p && p.includes("!")); }
 function coreForOwner(p){
@@ -317,19 +310,10 @@ function speak(t){
   speechSynthesis.speak(u);
 }
 
-function clearConfirmPending(){
-  resetPending=false;
-  undoPending=false;
-}
-function clearMoveConfirm(){
-  confirmAction = null;
-}
-function clearPromotionPending(){
-  promotionPending = null;
-}
-function userInteracted(){
-  clearConfirmPending();
-}
+function clearConfirmPending(){ resetPending=false; undoPending=false; }
+function clearMoveConfirm(){ confirmAction = null; }
+function clearPromotionPending(){ promotionPending = null; }
+function userInteracted(){ clearConfirmPending(); }
 
 /* 人の手だけundo対象にする（CPUの手で上書きしない） */
 function saveUndoSnapshot(){
@@ -395,7 +379,7 @@ function undoMove(){
   selectedHand = null;
   gameOver = undoSnapshot.gameOver;
   winner = undoSnapshot.winner;
-  lastMove = undoSnapshot.lastMove ? deepCopy(undoSnapshot.lastMove) : null;
+  lastMove = undoSnapshot.lastMove ? deepCopy(lastMove) : null;
 
   undoAvailable=false;
   undoSnapshot=null;
@@ -574,8 +558,6 @@ function onHandClick(owner, idx){
   userInteracted();
   if(gameOver){ speak(`すでにつんでいます。${winner}の勝ちです`); return; }
   if(owner!==turn){ speak("相手の持ち駒です"); return; }
-
-  // CPU手番中は操作させない（念のため）
   if(vsAI && turn==="gote"){ speak("コンピュータのばんです"); return; }
 
   selected=null;
@@ -602,32 +584,23 @@ function onClick(x,y){
   userInteracted();
 
   if(gameOver){ speak(`すでにつんでいます。${winner}の勝ちです`); return; }
+  if(vsAI && turn==="gote"){ speak("コンピュータのばんです"); return; }
 
-  // CPU手番中は操作させない
-  if(vsAI && turn==="gote"){
-    speak("コンピュータのばんです");
-    return;
-  }
-
-  /* ★最優先：成り確認中 */
   if(promotionPending){
     const sel = promotionPending.sel;
     const to  = promotionPending.to;
 
-    // 同じ「移動先」をもう一度タップ → 成る
     if(x===to.x && y===to.y){
       clearPromotionPending();
       executeMove(sel, to.x, to.y, { promote:true, declined:false });
       return;
     }
 
-    // それ以外 → 成らない（今後この駒は成れない）
     clearPromotionPending();
     executeMove(sel, to.x, to.y, { promote:false, declined:true });
     return;
   }
 
-  /* ★次優先：確認中なら「同じ座標2回目」で確定 */
   if(confirmAction){
     if(confirmAction.to.x===x && confirmAction.to.y===y){
       const action = confirmAction;
@@ -648,7 +621,6 @@ function onClick(x,y){
 
   const p=board[y][x];
 
-  /* ====== 1) 持ち駒選択：確認→2回目で打つ ====== */
   if(selectedHand){
     if(board[y][x]){
       speak("そこには駒があるので置けません。選択したこまを解除します。");
@@ -683,7 +655,6 @@ function onClick(x,y){
     return;
   }
 
-  /* ====== 2) 盤上の駒移動 ====== */
   if(selected){
     if(selected.x===x && selected.y===y){
       selected=null;
@@ -696,7 +667,6 @@ function onClick(x,y){
     const moverOwner=ownerOf(mover);
     const target=board[y][x];
 
-    // 自分の駒がある
     if(target){
       const targetOwner=ownerOf(target);
       if(moverOwner===targetOwner){
@@ -707,7 +677,6 @@ function onClick(x,y){
       }
     }
 
-    // 移動範囲外
     if(!canMove(mover, selected.x, selected.y, x, y)){
       speak(`${readMap[displayKey(mover)]}はそこには進めません。選択したこまを解除します。`);
       selected=null;
@@ -715,7 +684,6 @@ function onClick(x,y){
       return;
     }
 
-    // 確認（2回目同座標で確定）
     confirmAction = { type:"move", from:{x:selected.x,y:selected.y}, to:{x,y} };
     if(!target){
       speak(`選択した座標は${coordText(x,y)}です。移動しますか？`);
@@ -727,7 +695,6 @@ function onClick(x,y){
     return;
   }
 
-  /* ====== 3) まだ何も選択されていない ====== */
   if(p){
     const owner = ownerOf(p);
     if(owner!==turn){
@@ -847,7 +814,6 @@ function tryDrop(handSel, x, y){
   if(isDeadSquareOnDrop(piece, turn, y)){ speak(`${readMap[piece]}はそこには打てません`); return; }
   if(piece==="P" && hasUnpromotedPawnInFile(turn, x)){ speak("二歩になるので、そこには歩を打てません"); return; }
 
-  // ★人の手だけundo保存（turnがsenteのときのみ）
   if(!(vsAI && turn==="gote")) saveUndoSnapshot();
 
   const placed=(turn==="sente")?piece.toLowerCase():piece.toUpperCase();
@@ -867,12 +833,9 @@ function tryDrop(handSel, x, y){
 
   speak(`${moveText}次は${turn==="sente"?"せんて":"ごて"}のばんです`);
   render();
-
-  // ★CPU呼び出し
   maybeAIMove();
 }
 
-/* 成り確認が必要なら promotionPending を立てる */
 function tryMove(sel,x,y){
   const p=board[sel.y][sel.x];
   const target=board[y][x];
@@ -905,7 +868,6 @@ function tryMove(sel,x,y){
   executeMove(sel, x, y, { promote:false, declined:false });
 }
 
-/* 成る/成らない確定後に一括実行 */
 function executeMove(sel, x, y, opt){
   const fromPiece = board[sel.y][sel.x];
   const target = board[y][x];
@@ -933,10 +895,8 @@ function executeMove(sel, x, y, opt){
     return;
   }
 
-  // ★人の手だけundo保存（turnがsenteのときのみ）
   if(!(vsAI && turn==="gote")) saveUndoSnapshot();
 
-  // 取る
   if(target){
     const baseCaptured = baseKey(target);
     hands[turn].push(baseCaptured);
@@ -953,7 +913,6 @@ function executeMove(sel, x, y, opt){
   const playedBy=turn;
   const speakPieceBefore = readMap[displayKey(fromPiece)];
 
-  // 移動後の駒文字列
   let moved = fromPiece;
 
   let promoMsg="";
@@ -985,24 +944,32 @@ function executeMove(sel, x, y, opt){
     speak(`${moveText}次は${turn==="sente"?"せんて":"ごて"}のばんです`);
   }
   render();
-
-  // ★CPU呼び出し
   maybeAIMove();
 }
 
-/* ========= ★CPU（A案：軽量） =========
-   - 探索深さは最大3（スマホ向け）
-   - Lvが低いほどランダム性（ノイズ）を増やす
-   - ルールの“厳密な合法手（王手放置禁止）”は未実装（軽量優先）
-*/
+/* =========================================================
+   ★CPU：Lv5だけ「詰み探索」+「連続王手 +2拡張」を追加
+========================================================= */
 const pieceValue = { P:1, L:3, N:3, S:4, G:5, B:8, R:10, K:1000 };
 
 function valueOfPiece(p){
   if(!p) return 0;
   const b = baseKey(p);
   let v = pieceValue[b] || 0;
-  if(isPromoted(p)) v += 1.5;
+  if(isPromoted(p)) v += 1.8;
   return v;
+}
+
+function forwardBonus(p, y){
+  const o = ownerOf(p);
+  if(!o) return 0;
+  const b = baseKey(p);
+  if(b==="K") return 0;
+  if(o==="gote"){
+    return (y/8) * 0.18;
+  }else{
+    return ((8-y)/8) * 0.18;
+  }
 }
 
 function evaluate(side){
@@ -1012,16 +979,20 @@ function evaluate(side){
       const p=board[y][x];
       if(!p) continue;
       const o=ownerOf(p);
-      const v=valueOfPiece(p);
+      const v=valueOfPiece(p) + forwardBonus(p, y);
       s += (o===side)? v : -v;
     }
   }
-  for(const p of hands[side]) s += pieceValue[p]||0;
-  for(const p of hands[opposite(side)]) s -= pieceValue[p]||0;
+  for(const p of hands[side]) s += (pieceValue[p]||0) * 0.95;
+  for(const p of hands[opposite(side)]) s -= (pieceValue[p]||0) * 0.95;
+
+  if(isKingInCheck(opposite(side))) s += 1.0;
+  if(isKingInCheck(side)) s -= 2.0;
+
   return s;
 }
 
-function generateMoves(side){
+function generatePseudoMoves(side){
   const moves = [];
 
   // 盤上の移動
@@ -1094,12 +1065,21 @@ function applyMove(m, side){
 
     board[ty][tx] = moved;
     board[fy][fx] = null;
+
+    m._movedTo = {x:tx,y:ty};
+    m._movedPiece = moved;
+    m._captured = target;
+
   }else{
     const tx=m.to.x, ty=m.to.y;
     const piece = hands[side][m.handIdx];
     hands[side].splice(m.handIdx,1);
     const placed = (side==="sente") ? piece.toLowerCase() : piece.toUpperCase();
     board[ty][tx] = placed;
+
+    m._movedTo = {x:tx,y:ty};
+    m._movedPiece = placed;
+    m._captured = null;
   }
 
   turn = opposite(side);
@@ -1112,19 +1092,271 @@ function undoApply(snapshot){
   turn = snapshot.turn;
 }
 
-function minimax(side, depth, alpha, beta){
-  if(depth===0) return evaluate(side);
+function isLegalAfter(m, side){
+  const snap = applyMove(m, side);
+  const illegal = isKingInCheck(side);
+  undoApply(snap);
+  return !illegal;
+}
 
-  const moves = generateMoves(turn);
-  if(moves.length===0) return evaluate(side);
+function generateLegalMoves(side){
+  const pseudo = generatePseudoMoves(side);
+  const legal = [];
+  for(const m of pseudo){
+    if(isLegalAfter(m, side)) legal.push(m);
+  }
+  return legal;
+}
 
-  const maximizing = (turn===side);
+function attackersToSquare(attackerSide, tx, ty){
+  const list = [];
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p=board[y][x];
+      if(!p) continue;
+      if(ownerOf(p)!==attackerSide) continue;
+      if(canMove(p, x, y, tx, ty)) list.push({from:{x,y}, piece:p});
+    }
+  }
+  return list;
+}
+
+// ===== Lv5用：捕獲優先順位（高いほど優先） =====
+// 指定順：龍・馬・飛・角・金・銀・と・香・桂・歩
+const capturePriorityRank = {
+  "+R": 100, // 龍
+  "+B": 95,  // 馬
+  "R": 90,   // 飛
+  "B": 80,   // 角
+  "G": 70,   // 金
+  "S": 60,   // 銀
+  "+P": 55,  // と
+  "+L": 55,  // 成香（と同格寄せ）
+  "+N": 55,  // 成桂
+  "+S": 55,  // 成銀
+  "L": 40,   // 香
+  "N": 35,   // 桂
+  "P": 10    // 歩
+};
+
+function defendersToSquare(defenderSide, tx, ty){
+  // defenderSide が (tx,ty) を守っている駒一覧
+  const list = [];
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p=board[y][x];
+      if(!p) continue;
+      if(ownerOf(p)!==defenderSide) continue;
+      if(canMove(p, x, y, tx, ty)) list.push({from:{x,y}, piece:p});
+    }
+  }
+  return list;
+}
+
+// Lv5専用：取られやすさ（無防備を特に嫌う）
+function hangingPenaltyForMoveLv5(m, moverSide){
+  const to = m._movedTo;
+  const movedPiece = m._movedPiece;
+  if(!to || !movedPiece) return 0;
+
+  const enemy = opposite(moverSide);
+  const atks = attackersToSquare(enemy, to.x, to.y);
+  if(atks.length===0) return 0;
+
+  const defs = defendersToSquare(moverSide, to.x, to.y);
+  const myV = valueOfPiece(movedPiece);
+
+  // 「守りが0で取られる」＝最悪（Lv5は極端に嫌う）
+  if(defs.length===0){
+    return myV * 2.2;
+  }
+
+  // 守りがあっても危険は危険
+  let minAtkV = 999;
+  for(const a of atks) minAtkV = Math.min(minAtkV, valueOfPiece(a.piece));
+  const cheapAttack = (minAtkV <= myV * 0.6) ? 1.0 : 0.5;
+
+  return myV * (0.55 + 0.25*cheapAttack);
+}
+
+
+function captureRankOfPiece(p){
+  if(!p) return 0;
+  const dk = displayKey(p); // "+p!" → "+P"
+  return capturePriorityRank[dk] || 0;
+}
+
+
+function hangingPenaltyForMove(m, moverSide){
+  const to = m._movedTo;
+  const movedPiece = m._movedPiece;
+  if(!to || !movedPiece) return 0;
+
+  const enemy = opposite(moverSide);
+  const atks = attackersToSquare(enemy, to.x, to.y);
+  if(atks.length===0) return 0;
+
+  const myV = valueOfPiece(movedPiece);
+  let minAtkV = 999;
+  for(const a of atks){
+    minAtkV = Math.min(minAtkV, valueOfPiece(a.piece));
+  }
+  const ratio = Math.max(0.2, Math.min(1.0, minAtkV / (myV+0.01)));
+  return myV * (0.65 + 0.35*ratio);
+}
+
+function captureTradeBonus(m){
+  if(m.type!=="move" || !m._captured) return 0;
+  const capV = valueOfPiece(m._captured);
+  const myV  = valueOfPiece(m._movedPiece);
+  return Math.max(0, capV - myV*0.15);
+}
+
+/* ====== 手並び（αβ効かせる） ====== */
+function moveOrderScore(m, side){
+  let score = 0;
+  const inCheckBefore = isKingInCheck(side);
+  if(inCheckBefore) score += 20;
+
+  const snap = applyMove(m, side);
+
+  const givesCheck = isKingInCheck(opposite(side));
+  if(givesCheck) score += 25;
+
+  if(m.type==="move" && m._captured){
+    score += 10 + valueOfPiece(m._captured)*2;
+  }
+  // ===== Lv5：捕獲優先順位を強く反映 =====
+  if(aiLevel===5 && m.type==="move" && m._captured){
+    const r = captureRankOfPiece(m._captured);
+    score += r * 1.2;
+  }
+
+  if(m.type==="move" && m.promote) score += 8;
+
+  score += captureTradeBonus(m);
+  // ===== Lv5：無防備で取られるのを超嫌う（損判定）=====
+  if(aiLevel===5){
+    score -= hangingPenaltyForMoveLv5(m, side) * 1.25;
+  }else{
+    score -= hangingPenaltyForMove(m, side) * 0.7;
+  }
+
+  const enemyMoves = generateLegalMoves(turn);
+  if(enemyMoves.length===0){
+    score += 9999;
+  }else{
+    score += Math.max(0, 8 - enemyMoves.length) * 1.2;
+  }
+
+  undoApply(snap);
+  return score;
+}
+
+/* =========================================================
+   ★Lv5専用：詰み探索（王手絡みのラインだけ深掘り）
+   - attacker が相手玉に王手を継続して詰ませられるか
+   - 返信側は「合法手すべて」を試す（重いがLv5限定）
+========================================================= */
+function mateSearch(attacker, maxPlies, deadlineMs){
+  if(deadlineMs && performance.now() > deadlineMs) return null;
+
+  const defender = opposite(attacker);
+
+  // defenderに合法手が無い
+  const defMoves = generateLegalMoves(defender);
+  if(defMoves.length===0){
+    // 王手がかかっているなら詰み
+    if(isKingInCheck(defender)) return 0; // すでに詰み
+    return null; // ステイルメイト相当（将棋ではほぼ起きないが）
+  }
+  if(maxPlies<=0) return null;
+
+  // attacker手番で「王手をかける手」だけ探す（詰み探索の軽量化）
+  const atkMoves = generateLegalMoves(attacker);
+  atkMoves.sort((a,b)=>moveOrderScore(b, attacker)-moveOrderScore(a, attacker));
+
+  for(const m of atkMoves){
+    if(deadlineMs && performance.now() > deadlineMs) return null;
+
+    const snap = applyMove(m, attacker);
+    const givesCheck = isKingInCheck(defender);
+
+    if(!givesCheck){
+      undoApply(snap);
+      continue;
+    }
+
+    // 相手の全受けを試して、全部ダメなら詰み筋
+    const replies = generateLegalMoves(defender);
+    if(replies.length===0){
+      // 王手で手なし＝詰み
+      undoApply(snap);
+      return 1;
+    }
+
+    let allLose = true;
+    // defenderが一つでも逃げられるなら詰みじゃない
+    for(const r of replies){
+      if(deadlineMs && performance.now() > deadlineMs){ undoApply(snap); return null; }
+
+      const snap2 = applyMove(r, defender);
+
+      // 受けた後 attacker が詰ませられるか
+      const res = mateSearch(attacker, maxPlies-2, deadlineMs);
+      undoApply(snap2);
+
+      if(res===null){
+        allLose = false;
+        break;
+      }
+    }
+
+    undoApply(snap);
+
+    if(allLose){
+      return 1; // 「この手で詰み筋がある」
+    }
+  }
+
+  return null;
+}
+
+/* =========================================================
+   minimax：連続王手は最大+2拡張（Lv5だけ）
+   checkChain = 直近の「連続王手回数」（0〜）
+========================================================= */
+function minimax(rootSide, depth, alpha, beta, deadlineMs, checkChain){
+  if(deadlineMs && performance.now() > deadlineMs){
+    return evaluate(rootSide);
+  }
+  if(depth===0) return evaluate(rootSide);
+
+  const mover = turn;
+  const moves = generateLegalMoves(mover);
+  if(moves.length===0) return evaluate(rootSide);
+
+  moves.sort((a,b)=> moveOrderScore(b, mover) - moveOrderScore(a, mover));
+
+  const maximizing = (turn===rootSide);
   let best = maximizing ? -1e9 : 1e9;
 
   for(const m of moves){
-    const mover = turn;
+    if(deadlineMs && performance.now() > deadlineMs) break;
+
     const snap = applyMove(m, mover);
-    const score = minimax(side, depth-1, alpha, beta);
+
+    // 連続王手判定（今の手で相手が王手ならチェーン+1、違うなら0）
+    const givesCheck = isKingInCheck(opposite(mover));
+    const nextChain = givesCheck ? (checkChain+1) : 0;
+
+    // Lv5のみ：連続王手が続くと最大+2まで拡張
+    let extra = 0;
+    if(aiLevel===5 && givesCheck){
+      extra = Math.min(2, nextChain); // 1回目:+1、2回連続:+2、3回目以降も+2
+    }
+
+    const score = minimax(rootSide, depth-1+extra, alpha, beta, deadlineMs, nextChain);
     undoApply(snap);
 
     if(maximizing){
@@ -1156,53 +1388,122 @@ function maybeAIMove(){
     } finally {
       aiThinking = false;
     }
-  }, 250);
+  }, 150);
+}
+
+function aiParamsByLevel(lv){
+  // Lv1〜4はほぼそのまま。Lv5だけ重くても強い方向へ。
+  if(lv<=1) return {depthMax:2, noise:1.1, timeLimit:0, matePlies:0};
+  if(lv===2) return {depthMax:3, noise:0.6, timeLimit:0, matePlies:0};
+  if(lv===3) return {depthMax:4, noise:0.15, timeLimit:0, matePlies:0};
+  if(lv===4) return {depthMax:5, noise:0.03, timeLimit:220, matePlies:0};
+
+  // ★Lv5：重くてもOK → 深さ/時間/詰み探索を強化
+  return {depthMax:8, noise:0.0, timeLimit:1800, matePlies:10}; // 詰み探索は最大10ply（=5手分）
 }
 
 function doAIMove(){
   if(gameOver) return;
   if(turn!=="gote") return;
 
-  // ★軽量：探索深さは最大3（スマホ向け）
-  const depth = Math.min(aiLevel, 3);
+  const {depthMax, noise, timeLimit, matePlies} = aiParamsByLevel(aiLevel);
+  const deadlineMs = timeLimit ? (performance.now() + timeLimit) : null;
 
-  const moves = generateMoves("gote");
+  let moves = generateLegalMoves("gote");
   if(moves.length===0){
     speak("コンピュータは指す手がありません。");
     return;
   }
 
-  let bestMove = null;
-  let bestScore = -1e9;
+  moves.sort((a,b)=> moveOrderScore(b, "gote") - moveOrderScore(a, "gote"));
 
-  // Lvが低いほどブレる（＝弱く感じる）
-  const noise = (6 - aiLevel) * 0.6; // 調整値：大きいほどランダム
-
-  // 速度優先：候補が多すぎる時はランダム間引き（スマホ向け）
+  // Lv5は間引きしない（強さ優先）
   let candidates = moves;
-  if(moves.length > 180){
-    // 多いときはランダムに間引く（強さが高いほど残す）
-    const keep = Math.floor(80 + aiLevel*30); // Lv1:110, Lv5:230（上限候補より大きければそのまま）
-    const shuffled = moves.slice().sort(()=>Math.random()-0.5);
-    candidates = shuffled.slice(0, Math.min(keep, shuffled.length));
+  if(aiLevel<=2 && moves.length>160) candidates = moves.slice(0, aiLevel===1 ? 60 : 110);
+  else if(aiLevel===3 && moves.length>260) candidates = moves.slice(0, 200);
+
+  // ===== Lv5：取れる手が複数あるなら優先順を強制（ただし自爆は避ける）=====
+  if(aiLevel===5){
+    const captureMoves = candidates.filter(m => m.type==="move");
+    const scoredCaps = [];
+    for(const m of captureMoves){
+      const snap = applyMove(m, "gote");
+      const cap = m._captured;
+      const givesCap = !!cap;
+      let capRank = givesCap ? captureRankOfPiece(cap) : 0;
+
+      const risk = hangingPenaltyForMoveLv5(m, "gote");
+      undoApply(snap);
+
+      if(givesCap){
+        scoredCaps.push({m, capRank, risk});
+      }
+    }
+
+    if(scoredCaps.length>=2){
+      scoredCaps.sort((a,b)=> (b.capRank - a.capRank) || (a.risk - b.risk));
+      const top = scoredCaps[0];
+      if(top && top.risk < 25){
+        candidates = [top.m, ...candidates.filter(x=>x!==top.m)];
+      }
+    }
   }
 
+  // ===== Lv5：まず「詰み探索」だけ強化（王手絡み候補から） =====
+  if(aiLevel===5 && matePlies>0){
+    for(const m of candidates){
+      if(deadlineMs && performance.now() > deadlineMs) break;
+
+      const snap = applyMove(m, "gote");
+      const givesCheck = isKingInCheck("sente");
+
+      // 王手をかける手だけ詰み探索
+      let mateFound = false;
+      if(givesCheck){
+        // すでに手なしなら即詰み
+        const replies = generateLegalMoves("sente");
+        if(replies.length===0 && isKingInCheck("sente")){
+          mateFound = true;
+        }else{
+          // 本格的な「王手継続」詰み探索
+          const res = mateSearch("gote", matePlies, deadlineMs);
+          if(res!==null) mateFound = true;
+        }
+      }
+
+      undoApply(snap);
+
+      if(mateFound){
+        // 詰み筋が見つかったら即採用
+        bestMoveApplyAndSpeak(m);
+        return;
+      }
+    }
+  }
+
+  // ===== 通常探索（反復深化なし・Lv5は深く読む） =====
+  let bestMove = candidates[0];
+  let bestScore = -1e9;
+
   for(const m of candidates){
+    if(deadlineMs && performance.now() > deadlineMs) break;
+
     const snap = applyMove(m, "gote");
-    const score = minimax("gote", depth-1, -1e9, 1e9);
+    const score = minimax("gote", Math.max(1, depthMax-1), -1e9, 1e9, deadlineMs, 0);
     undoApply(snap);
 
     const noisy = score + (Math.random()*2-1)*noise;
-
     if(noisy > bestScore){
       bestScore = noisy;
       bestMove = m;
     }
   }
 
-  if(!bestMove) bestMove = candidates[Math.floor(Math.random()*candidates.length)];
+  bestMoveApplyAndSpeak(bestMove);
+}
 
-  // ★CPUは「確認」や「成り確認UI」を使わず直接反映
+function bestMoveApplyAndSpeak(bestMove){
+  // ===== 実際に反映（CPUはUI確認なしで直接） =====
   if(bestMove.type==="move"){
     const fx=bestMove.from.x, fy=bestMove.from.y;
     const tx=bestMove.to.x, ty=bestMove.to.y;
@@ -1210,7 +1511,6 @@ function doAIMove(){
     const fromPiece = board[fy][fx];
     const target = board[ty][tx];
 
-    // 取る
     if(target){
       const baseCaptured = baseKey(target);
       hands.gote.push(baseCaptured);
@@ -1232,21 +1532,20 @@ function doAIMove(){
     board[ty][tx]=moved;
     board[fy][fx]=null;
 
-    const speakPieceBefore = readMap[displayKey(fromPiece)];
-    let moveText=`${coordText(tx,ty)}に${speakPieceBefore}を指しました。`;
-    if(target) moveText+=`${readMap[displayKey(target)]}を取りました。`;
-    if(bestMove.promote) moveText+=`${readMap[baseKey(fromPiece)]}が${readMap[displayKey(moved)]}になりました。`;
-
     turn="sente";
-    if(isKingInCheck(turn)) moveText+="王手です。";
-    lastMove={ player:"gote", text: moveText };
 
+    const pieceName = readMap[baseKey(fromPiece)];
+    let say = `${coordText(tx,ty)}に${pieceName}を指しました。`;
+    if(target) say += `${readMap[displayKey(target)]}を取りました。`;
+    if(bestMove.promote) say += `${pieceName}が${readMap[displayKey(moved)]}になりました。`;
+    if(isKingInCheck("sente")) say += "王手です。";
+    say += "次はせんてのばんです。";
+
+    lastMove={ player:"gote", text: say.replace("次はせんてのばんです。","") };
     render();
-    const head = `${coordText(tx,ty)}に${readMap[baseKey(fromPiece)]}${bestMove.promote ? "を" : "を"}${target ? "指して" : "指して"}`;
-    speak(`${coordText(tx,ty)}に${readMap[baseKey(fromPiece)]}を指しました。${target ? readMap[displayKey(target)]+"を取りました。" : ""}${bestMove.promote ? readMap[baseKey(fromPiece)]+"が"+readMap[displayKey(moved)]+"になりました。" : ""}${isKingInCheck("sente") ? "王手です。" : ""}次はせんてのばんです。`);
+    speak(say);
 
   }else{
-    // drop
     const x=bestMove.to.x, y=bestMove.to.y;
     const idx=bestMove.handIdx;
     const piece = hands.gote[idx];
@@ -1255,21 +1554,29 @@ function doAIMove(){
     board[y][x] = piece.toUpperCase();
     hands.gote.splice(idx,1);
 
-    let moveText=`${coordText(x,y)}に${readMap[piece]}を打ちました。`;
     turn="sente";
-    if(isKingInCheck(turn)) moveText+="王手です。";
-    lastMove={ player:"gote", text: moveText };
 
+    let say = `${coordText(x,y)}に${readMap[piece]}を打ちました。`;
+    if(isKingInCheck("sente")) say += "王手です。";
+    say += "次はせんてのばんです。";
+
+    lastMove={ player:"gote", text: say.replace("次はせんてのばんです。","") };
     render();
-    speak(`${coordText(x,y)}に${readMap[piece]}を打ちました。${isKingInCheck("sente") ? "王手です。" : ""}次はせんてのばんです。`);
+    speak(say);
   }
 }
 
 /* ========= 起動 ========= */
+function initNums(){
+  const t=document.getElementById("topNums");
+  const r=document.getElementById("rightNums");
+  t.innerHTML=""; r.innerHTML="";
+  for(let i=9;i>=1;i--) t.innerHTML+=`<div>${i}</div>`;
+  for(let i=1;i<=9;i++) r.innerHTML+=`<div>${i}</div>`;
+}
 initNums();
 resetGame();
-setAILevel(2); // 初期レベル表示
+setAILevel(2);
 </script>
 </body>
 </html>
-
