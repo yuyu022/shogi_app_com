@@ -240,7 +240,7 @@ let selectedHand=null;
 
 let speechRate = 1.0;
 const RATE_NORMAL = 1.0;
-const RATE_FAST = 2.5;
+const RATE_FAST =1.8;
 
 let lastMove = null;
 
@@ -271,7 +271,8 @@ function setAILevel(lv){
     if(!b) continue;
     b.classList.toggle("aiSelected", i===lv);
   }
-  speak(`コンピュータの強さを${lv}にしました。`);
+  const levelName = ["", "弱い", "普通", "強い", "かなり強い", "最強"];
+  speak(`コンピュータの強さを${levelName[lv]}にしました。`);
 }
 
 /* ========= ユーティリティ ========= */
