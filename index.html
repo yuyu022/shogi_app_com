@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>しゃべる将棋（人 vs CPU）</title>
+
+<style>
+:root{
+  --cell: 60px;
+  --boardW: calc(var(--cell) * 9);
+  --handW: 70px;
+  --gap: 10px;
+}
+@media (max-width: 760px){ :root{ --cell: 54px; } }
+@media (max-width: 650px){ :root{ --cell: 48px; } }
+@media (max-width: 560px){ :root{ --cell: 42px; } }
+@media (max-width: 480px){ :root{ --cell: 36px; } }
+
+*{ box-sizing:border-box; }
+body{
+  font-family:sans-serif;
+  margin:0;
+  padding:12px;
+}
+
+#app{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+#stage{
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+/* コントロール全体 */
+.controlsWrap{
+  width: var(--boardW);
+  margin: 10px auto;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.controlsWrap button{
+  min-height: 90px;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+/* 上段2つ */
+.controlsTop{
+  width: var(--boardW);
+  display:grid;
+  grid-template-columns:repeat(2, 1fr);
+  gap:8px;
+}
+
+/* 中段3つ */
+.controlsBottom{
+  width: var(--boardW);
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:8px;
+}
+
+/* AIレベル行（5つ） */
+#aiLevelRow{
+  width: var(--boardW);
+  display:grid;
+  grid-template-columns:repeat(5, 1fr);
+  gap:8px;
+}
+#aiLevelRow button{
+  min-height: 70px;
+  font-size: 16px;
+  font-weight: 900;
+}
+.aiSelected{
+  outline: 4px solid #ff9800;
+  background: #fff3e0;
+}
+
+/* 上の筋数字 */
+#topNums{
+  width: var(--boardW);
+  display:grid;
+  grid-template-columns:repeat(9, var(--cell));
+  justify-content:center;
+  margin: 0 auto;
+}
+#topNums div{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-weight:900;
+  font-size:22px;
+}
+
+/* 盤＋左右持ち駒＋右段数字 */
+#mainRow{
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+  gap: var(--gap);
+}
+
+/* 左右持ち駒（縦） */
+#handsSente, #handsGote{
+  width: var(--handW);
+  min-height: calc(var(--cell) * 9);
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+#handsSente{
+  justify-content:flex-start;
+  flex-direction:column-reverse;
+}
+#handsGote{
+  justify-content:flex-start;
+}
+
+.hand{
+  width: calc(var(--cell) * 0.9);
+  height: calc(var(--cell) * 0.9);
+  border:2px solid #333;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-size:28px;
+  font-weight:900;
+  cursor:pointer;
+  user-select:none;
+  margin:0 auto;
+}
+.selected{ background:#ffe08a; }
+
+/* 盤＋右数字 */
+#boardWrap{ display:flex; }
+
+#board{
+  background:#fff8dc;
+  display:grid;
+  grid-template-columns:repeat(9, var(--cell));
+  grid-template-rows:repeat(9, var(--cell));
+  border:2px solid #333;
+}
+.cell{
+  border:1px solid #999;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-size:32px;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.sente{ transform:none; }
+.gote{ transform:rotate(180deg); color:red; }
+
+/* 右の段数字 */
+#rightNums{
+  display:grid;
+  grid-template-rows:repeat(9, var(--cell));
+  margin-left:6px;
+}
+#rightNums div{
+  font-size:22px;
+  font-weight:900;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+}
+</style>
+</head>
+
+<body>
+<div id="app">
+  <div id="stage">
+
+    <div class="controlsWrap">
+      <div class="controlsTop">
+        <button onclick="onResetButton()">リセット</button>
+        <button onclick="onUndoButton()">戻す</button>
+      </div>
+
+      <div class="controlsBottom">
+        <button id="speedBtn" onclick="toggleSpeed()">速度：普通</button>
+        <button onclick="repeatLastMove()">直前の手を復唱</button>
+        <button onclick="speakHands()">持ち駒を読み上げ</button>
+      </div>
+
+      <!-- ★AI強さボタン（5段階） -->
+      <div id="aiLevelRow">
+        <button id="aiBtn1" onclick="setAILevel(1)">弱い</button>
+        <button id="aiBtn2" onclick="setAILevel(2)">普通</button>
+        <button id="aiBtn3" onclick="setAILevel(3)">強い</button>
+        <button id="aiBtn4" onclick="setAILevel(4)">かなり強い</button>
+        <button id="aiBtn5" onclick="setAILevel(5)">最強</button>
+      </div>
+    </div>
+
+    <div id="topNums"></div>
+
+    <div id="mainRow">
+      <div id="handsSente"></div>
+
+      <div id="boardWrap">
+        <div id="board"></div>
+        <div id="rightNums"></div>
+      </div>
+
+      <div id="handsGote"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ========= 表示/読み ========= */
+const nameMap={
+  P:"歩",L:"香",N:"桂",S:"銀",G:"金",B:"角",R:"飛",K:"王",
+  "+P":"と","+L":"と","+N":"と","+S":"全","+B":"馬","+R":"龍"
+};
+const readMap={
+  P:"ふ",L:"きょうしゃ",N:"けいま",S:"ぎん",G:"きん",B:"かく",R:"ひしゃ",K:"おう",
+  "+P":"と","+L":"と","+N":"と","+S":"ぜん","+B":"うま","+R":"りゅう"
+};
+
+/* ========= 状態 ========= */
+let board,turn,selected;
+let hands={sente:[], gote:[]};
+let gameOver=false,winner=null;
+let selectedHand=null;
+
+let speechRate = 2.0;
+const RATE_NORMAL = 2.0;
+const RATE_FAST = 3.5;
+
+let lastMove = null;
+
+// リセット二度押し確認
+let resetPending = false;
+// 戻す二度押し確認
+let undoPending = false;
+
+/* 戻す用（最大1回） */
+let undoAvailable = true;
+let undoSnapshot = null;
+
+/* 移動/捕獲/打ち の「確認タップ」状態 */
+let confirmAction = null;
+
+/* 成り確認（同じ移動先をもう一度タップで「成る」） */
+let promotionPending = null;
+
+/* ========= ★CPU設定（A案：軽量） ========= */
+let vsAI = true;          // 後手＝CPU
+let aiLevel = 2;          // 1〜5
+let aiThinking = false;   // 多重実行防止
+
+function setAILevel(lv){
+  aiLevel = lv;
+  for(let i=1;i<=5;i++){
+    const b=document.getElementById("aiBtn"+i);
+    if(!b) continue;
+    b.classList.toggle("aiSelected", i===lv);
+  }
+  speak(`コンピュータの強さを${lv}にしました。`);
+}
+
+/* ========= ユーティリティ ========= */
+function deepCopy(obj){ return JSON.parse(JSON.stringify(obj)); }
+
+/* ====== 駒表現の拡張（! を付けると「この駒は今後成れない」） ====== */
+function stripMeta(p){ return p ? p.replace(/!/g,"") : p; }
+function hasNoPromoteFlag(p){ return !!(p && p.includes("!")); }
+function coreForOwner(p){
+  if(!p) return null;
+  let s = stripMeta(p);
+  if(s.startsWith("+")) s = s.slice(1);
+  return s;
+}
+function ownerOf(p){
+  const c = coreForOwner(p);
+  if(!c) return null;
+  return (c===c.toLowerCase()) ? "sente" : "gote";
+}
+function displayKey(p){
+  if(!p) return null;
+  return stripMeta(p).toUpperCase();
+}
+function baseKey(p){
+  if(!p) return null;
+  return stripMeta(p).toUpperCase().replace("+","");
+}
+function isPromoted(p){
+  const s = stripMeta(p);
+  return !!(s && s.startsWith("+"));
+}
+function addNoPromoteFlag(p){
+  if(!p) return p;
+  if(p.includes("!")) return p;
+  return p + "!";
+}
+
+function speak(t){
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);
+  u.rate=speechRate;
+  speechSynthesis.speak(u);
+}
+
+function clearConfirmPending(){
+  resetPending=false;
+  undoPending=false;
+}
+function clearMoveConfirm(){
+  confirmAction = null;
+}
+function clearPromotionPending(){
+  promotionPending = null;
+}
+function userInteracted(){
+  clearConfirmPending();
+}
+
+/* 人の手だけundo対象にする（CPUの手で上書きしない） */
+function saveUndoSnapshot(){
+  undoSnapshot={
+    board: deepCopy(board),
+    hands: deepCopy(hands),
+    turn: turn,
+    selected: null,
+    selectedHand: null,
+    gameOver: gameOver,
+    winner: winner,
+    lastMove: deepCopy(lastMove),
+  };
+}
+
+/* --- リセット（2度押し） --- */
+function onResetButton(){
+  undoPending=false;
+  clearMoveConfirm();
+  clearPromotionPending();
+
+  if(resetPending){
+    resetPending=false;
+    resetGame();
+    return;
+  }
+  resetPending=true;
+  speak("リセットする場合はもう一度押してください");
+}
+
+/* --- 戻す（2度押し） --- */
+function onUndoButton(){
+  resetPending=false;
+  clearMoveConfirm();
+  clearPromotionPending();
+
+  if(!undoAvailable){
+    undoPending=false;
+    speak("戻す機能はすでにしようずみです");
+    return;
+  }
+  if(!undoSnapshot){
+    undoPending=false;
+    speak("まだ戻せる手がありません");
+    return;
+  }
+
+  if(undoPending){
+    undoPending=false;
+    undoMove();
+    return;
+  }
+
+  undoPending=true;
+  speak("戻す場合はもう一度押してください");
+}
+
+function undoMove(){
+  board = deepCopy(undoSnapshot.board);
+  hands = deepCopy(undoSnapshot.hands);
+  turn = undoSnapshot.turn;
+  selected = null;
+  selectedHand = null;
+  gameOver = undoSnapshot.gameOver;
+  winner = undoSnapshot.winner;
+  lastMove = undoSnapshot.lastMove ? deepCopy(undoSnapshot.lastMove) : null;
+
+  undoAvailable=false;
+  undoSnapshot=null;
+
+  clearMoveConfirm();
+  clearPromotionPending();
+  render();
+  speak(`一手戻しました。次は${turn==="sente"?"せんて":"ごて"}のばんです。`);
+}
+
+function numToKanji(n){
+  const map={0:"零",1:"一",2:"二",3:"三",4:"四",5:"五",6:"六",7:"七",8:"八",9:"九",10:"十"};
+  if(n<=10) return map[n];
+  if(n<20) return "十"+map[n-10];
+  return String(n);
+}
+
+function countHands(arr){
+  const m={};
+  for(const p of arr) m[p]=(m[p]||0)+1;
+  return m;
+}
+
+function speakHands(){
+  clearMoveConfirm();
+  clearPromotionPending();
+  userInteracted();
+  const order=["R","B","G","S","N","L","P"];
+
+  function sideText(side){
+    const counts=countHands(hands[side]);
+    const parts=[];
+    for(const k of order){
+      const c=counts[k]||0;
+      if(c>0) parts.push(`${nameMap[k]}${numToKanji(c)}個`);
+    }
+    return parts.length ? parts.join("、") : "持ち駒なし";
+  }
+
+  speak(`先手は${sideText("sente")}。後手は${sideText("gote")}。`);
+}
+
+function toggleSpeed(){
+  clearMoveConfirm();
+  clearPromotionPending();
+  userInteracted();
+  const before=(speechRate===RATE_FAST)?"早い":"普通";
+  speechRate=(speechRate===RATE_FAST)?RATE_NORMAL:RATE_FAST;
+  const after=(speechRate===RATE_FAST)?"早い":"普通";
+  document.getElementById("speedBtn").textContent=`速度：${after}`;
+  speak(`速度を${before}から${after}に変更しました。`);
+}
+
+function repeatLastMove(){
+  clearMoveConfirm();
+  clearPromotionPending();
+  userInteracted();
+  if(!lastMove){ speak("まだ手がありません"); return; }
+  const who=(lastMove.player==="sente")?"先手":"後手";
+  speak(`${who}は${lastMove.text}`);
+}
+
+function initNums(){
+  const t=document.getElementById("topNums");
+  const r=document.getElementById("rightNums");
+  t.innerHTML=""; r.innerHTML="";
+  for(let i=9;i>=1;i--) t.innerHTML+=`<div>${i}</div>`;
+  for(let i=1;i<=9;i++) r.innerHTML+=`<div>${i}</div>`;
+}
+
+function resetGame(){
+  board=[
+    ["L","N","S","G","K","G","S","N","L"],
+    [null,"R",null,null,null,null,null,"B",null],
+    ["P","P","P","P","P","P","P","P","P"],
+    [null,null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null,null],
+    ["p","p","p","p","p","p","p","p","p"],
+    [null,"b",null,null,null,null,null,"r",null],
+    ["l","n","s","g","k","g","s","n","l"]
+  ];
+  hands={sente:[], gote:[]};
+  turn="sente";
+  selected=null;
+  selectedHand=null;
+  gameOver=false;
+  winner=null;
+  lastMove=null;
+
+  resetPending=false;
+  undoPending=false;
+
+  undoAvailable=true;
+  undoSnapshot=null;
+
+  clearMoveConfirm();
+  clearPromotionPending();
+
+  render();
+  speak("リセットされました。先手の番です。");
+}
+
+/* ========= 描画 ========= */
+function renderHands(){
+  const s=document.getElementById("handsSente");
+  const g=document.getElementById("handsGote");
+  s.innerHTML=""; g.innerHTML="";
+
+  hands.sente.forEach((p,idx)=>{
+    const d=document.createElement("div");
+    d.className="hand";
+    d.textContent=nameMap[p];
+    if(turn==="sente" && selectedHand && selectedHand.idx===idx) d.classList.add("selected");
+    d.onclick=()=>onHandClick("sente", idx);
+
+    d.ondblclick=()=>{
+      if(confirmAction || promotionPending) return;
+      clearMoveConfirm(); clearPromotionPending(); userInteracted();
+      selectedHand=null; speak("持ち駒選択を解除しました"); render();
+    };
+
+    s.appendChild(d);
+  });
+
+  hands.gote.forEach((p,idx)=>{
+    const d=document.createElement("div");
+    d.className="hand gote";
+    d.textContent=nameMap[p];
+    if(turn==="gote" && selectedHand && selectedHand.idx===idx) d.classList.add("selected");
+    d.onclick=()=>onHandClick("gote", idx);
+
+    d.ondblclick=()=>{
+      if(confirmAction || promotionPending) return;
+      clearMoveConfirm(); clearPromotionPending(); userInteracted();
+      selectedHand=null; speak("持ち駒選択を解除しました"); render();
+    };
+
+    g.appendChild(d);
+  });
+}
+
+function render(){
+  const b=document.getElementById("board");
+  b.innerHTML="";
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const d=document.createElement("div");
+      d.className="cell";
+      const p=board[y][x];
+      if(p){
+        d.textContent=nameMap[displayKey(p)];
+        d.classList.add(ownerOf(p)==="sente" ? "sente" : "gote");
+      }
+      if(selected && selected.x===x && selected.y===y) d.classList.add("selected");
+      d.onclick=()=>onClick(x,y);
+
+      d.ondblclick=()=>{
+        if(confirmAction || promotionPending) return;
+        clearMoveConfirm(); clearPromotionPending(); userInteracted();
+        selected=null; selectedHand=null;
+        speak("持ち駒選択を解除しました");
+        render();
+      };
+
+      b.appendChild(d);
+    }
+  }
+  renderHands();
+}
+
+/* ========= 入力 ========= */
+function onHandClick(owner, idx){
+  clearMoveConfirm();
+  clearPromotionPending();
+  userInteracted();
+  if(gameOver){ speak(`すでにつんでいます。${winner}の勝ちです`); return; }
+  if(owner!==turn){ speak("相手の持ち駒です"); return; }
+
+  // CPU手番中は操作させない（念のため）
+  if(vsAI && turn==="gote"){ speak("コンピュータのばんです"); return; }
+
+  selected=null;
+
+  if(selectedHand && selectedHand.idx===idx){
+    selectedHand=null;
+    speak("持ち駒選択を解除しました");
+    render();
+    return;
+  }
+
+  const piece=hands[turn][idx];
+  selectedHand={ piece, idx };
+  const who=(turn==="sente")?"先手":"後手";
+  speak(`${who}の持ち駒である${readMap[piece]}を選択しました`);
+  render();
+}
+
+function coordText(x,y){ return `${9-x}筋${y+1}段`; }
+function sideName(side){ return side==="sente" ? "先手" : "後手"; }
+
+/* ====== クリック処理 ====== */
+function onClick(x,y){
+  userInteracted();
+
+  if(gameOver){ speak(`すでにつんでいます。${winner}の勝ちです`); return; }
+
+  // CPU手番中は操作させない
+  if(vsAI && turn==="gote"){
+    speak("コンピュータのばんです");
+    return;
+  }
+
+  /* ★最優先：成り確認中 */
+  if(promotionPending){
+    const sel = promotionPending.sel;
+    const to  = promotionPending.to;
+
+    // 同じ「移動先」をもう一度タップ → 成る
+    if(x===to.x && y===to.y){
+      clearPromotionPending();
+      executeMove(sel, to.x, to.y, { promote:true, declined:false });
+      return;
+    }
+
+    // それ以外 → 成らない（今後この駒は成れない）
+    clearPromotionPending();
+    executeMove(sel, to.x, to.y, { promote:false, declined:true });
+    return;
+  }
+
+  /* ★次優先：確認中なら「同じ座標2回目」で確定 */
+  if(confirmAction){
+    if(confirmAction.to.x===x && confirmAction.to.y===y){
+      const action = confirmAction;
+      clearMoveConfirm();
+
+      if(action.type==="drop"){
+        tryDrop(action.hand, x, y);
+        return;
+      }
+      if(action.type==="move" && selected){
+        tryMove(selected, x, y);
+        return;
+      }
+    }else{
+      clearMoveConfirm();
+    }
+  }
+
+  const p=board[y][x];
+
+  /* ====== 1) 持ち駒選択：確認→2回目で打つ ====== */
+  if(selectedHand){
+    if(board[y][x]){
+      speak("そこには駒があるので置けません。選択したこまを解除します。");
+      selectedHand=null;
+      render();
+      return;
+    }
+
+    const piece = hands[turn][selectedHand.idx];
+    if(!piece){
+      speak("持ち駒が見つかりません。持ち駒選択を解除しました");
+      selectedHand=null;
+      render();
+      return;
+    }
+
+    if(isDeadSquareOnDrop(piece, turn, y)){
+      speak(`${readMap[piece]}はそこには打てません。選択したこまを解除します。`);
+      selectedHand=null;
+      render();
+      return;
+    }
+    if(piece==="P" && hasUnpromotedPawnInFile(turn, x)){
+      speak("二歩になるので、そこには歩を打てません。選択したこまを解除します。");
+      selectedHand=null;
+      render();
+      return;
+    }
+
+    confirmAction = { type:"drop", to:{x,y}, hand:{piece:selectedHand.piece, idx:selectedHand.idx} };
+    speak(`選択した座標は${coordText(x,y)}です。${nameMap[piece]}を置きますか？`);
+    return;
+  }
+
+  /* ====== 2) 盤上の駒移動 ====== */
+  if(selected){
+    if(selected.x===x && selected.y===y){
+      selected=null;
+      speak("選択を解除しました");
+      render();
+      return;
+    }
+
+    const mover=board[selected.y][selected.x];
+    const moverOwner=ownerOf(mover);
+    const target=board[y][x];
+
+    // 自分の駒がある
+    if(target){
+      const targetOwner=ownerOf(target);
+      if(moverOwner===targetOwner){
+        speak("自分の駒があるのでそこには指せません。選択したこまを解除します。");
+        selected=null;
+        render();
+        return;
+      }
+    }
+
+    // 移動範囲外
+    if(!canMove(mover, selected.x, selected.y, x, y)){
+      speak(`${readMap[displayKey(mover)]}はそこには進めません。選択したこまを解除します。`);
+      selected=null;
+      render();
+      return;
+    }
+
+    // 確認（2回目同座標で確定）
+    confirmAction = { type:"move", from:{x:selected.x,y:selected.y}, to:{x,y} };
+    if(!target){
+      speak(`選択した座標は${coordText(x,y)}です。移動しますか？`);
+    }else{
+      const targetOwner=ownerOf(target);
+      const pieceName = nameMap[displayKey(target)];
+      speak(`選択した座標は${coordText(x,y)}です。${sideName(targetOwner)}の${pieceName}があります。取りますか？`);
+    }
+    return;
+  }
+
+  /* ====== 3) まだ何も選択されていない ====== */
+  if(p){
+    const owner = ownerOf(p);
+    if(owner!==turn){
+      const pieceName = readMap[displayKey(p)];
+      speak(`そこは相手の${pieceName}で、${coordText(x,y)}です。`);
+      return;
+    }
+    selected={x,y};
+    speak(`${coordText(x,y)}の${readMap[displayKey(p)]}を選択しました`);
+    render();
+  } else {
+    speak(`そこは${coordText(x,y)}です。`);
+  }
+}
+
+/* ========= ルール ========= */
+function pathClear(sx,sy,tx,ty){
+  const dx=Math.sign(tx-sx), dy=Math.sign(ty-sy);
+  let cx=sx+dx, cy=sy+dy;
+  while(cx!==tx||cy!==ty){
+    if(board[cy][cx]) return false;
+    cx+=dx; cy+=dy;
+  }
+  return true;
+}
+
+function canMove(p,sx,sy,tx,ty){
+  const pp = stripMeta(p);
+  const dx=tx-sx, dy=ty-sy;
+  const dir = (ownerOf(pp)==="sente") ? -1 : 1;
+  const u = pp.toUpperCase();
+
+  switch(u){
+    case "P": return dx===0 && dy===dir;
+    case "L": return dx===0 && dy*dir>0 && pathClear(sx,sy,tx,ty);
+    case "N": return Math.abs(dx)===1 && dy===2*dir;
+    case "S": return (Math.abs(dx)===1&&Math.abs(dy)===1)||(dx===0&&dy===dir);
+    case "G":
+    case "+P":case "+L":case "+N":case "+S":
+      return (Math.abs(dx)<=1&&Math.abs(dy)<=1)&&!(Math.abs(dx)===1&&dy===-dir);
+    case "B": return Math.abs(dx)===Math.abs(dy)&&pathClear(sx,sy,tx,ty);
+    case "R": return (dx===0||dy===0)&&pathClear(sx,sy,tx,ty);
+    case "+B": return (Math.abs(dx)===Math.abs(dy)&&pathClear(sx,sy,tx,ty))||(Math.abs(dx)<=1&&Math.abs(dy)<=1);
+    case "+R": return ((dx===0||dy===0)&&pathClear(sx,sy,tx,ty))||(Math.abs(dx)<=1&&Math.abs(dy)<=1);
+    case "K": return Math.abs(dx)<=1&&Math.abs(dy)<=1;
+  }
+  return false;
+}
+
+function opposite(side){ return side==="sente" ? "gote" : "sente"; }
+
+function findKingPos(side){
+  const k = (side==="sente") ? "k" : "K";
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p = board[y][x];
+      if(!p) continue;
+      const core = coreForOwner(p);
+      if(core===k) return {x,y};
+    }
+  }
+  return null;
+}
+
+function isKingInCheck(defender){
+  const kp=findKingPos(defender);
+  if(!kp) return false;
+  const attacker=opposite(defender);
+
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p=board[y][x];
+      if(!p) continue;
+      const owner=ownerOf(p);
+      if(owner!==attacker) continue;
+      if(canMove(p, x, y, kp.x, kp.y)) return true;
+    }
+  }
+  return false;
+}
+
+function hasUnpromotedPawnInFile(owner, x){
+  const pawn = (owner==="sente") ? "p" : "P";
+  for(let y=0;y<9;y++){
+    const p = board[y][x];
+    if(!p) continue;
+    const s = stripMeta(p);
+    if(s===pawn) return true;
+  }
+  return false;
+}
+
+function isDeadSquareOnDrop(piece, owner, y){
+  if(piece==="P"||piece==="L"){
+    if(owner==="sente"&&y===0) return true;
+    if(owner==="gote"&&y===8) return true;
+  }
+  if(piece==="N"){
+    if(owner==="sente"&&(y===0||y===1)) return true;
+    if(owner==="gote"&&(y===8||y===7)) return true;
+  }
+  return false;
+}
+
+/* ========= 指し手確定（人用） ========= */
+function tryDrop(handSel, x, y){
+  if(board[y][x]){ speak("そこには駒があるので置けません"); return; }
+
+  const piece=hands[turn][handSel.idx];
+  if(!piece){
+    selectedHand=null;
+    speak("持ち駒が見つかりません。持ち駒選択を解除しました");
+    render();
+    return;
+  }
+
+  if(isDeadSquareOnDrop(piece, turn, y)){ speak(`${readMap[piece]}はそこには打てません`); return; }
+  if(piece==="P" && hasUnpromotedPawnInFile(turn, x)){ speak("二歩になるので、そこには歩を打てません"); return; }
+
+  // ★人の手だけundo保存（turnがsenteのときのみ）
+  if(!(vsAI && turn==="gote")) saveUndoSnapshot();
+
+  const placed=(turn==="sente")?piece.toLowerCase():piece.toUpperCase();
+  board[y][x]=placed;
+
+  const playedBy=turn;
+  hands[turn].splice(handSel.idx, 1);
+
+  selectedHand=null;
+  selected=null;
+  turn=(turn==="sente")?"gote":"sente";
+
+  let moveText=`${coordText(x,y)}に${readMap[piece]}を打ちました。`;
+  if(isKingInCheck(turn)) moveText+="王手です。";
+
+  lastMove={ player: playedBy, text: moveText };
+
+  speak(`${moveText}次は${turn==="sente"?"せんて":"ごて"}のばんです`);
+  render();
+
+  // ★CPU呼び出し
+  maybeAIMove();
+}
+
+/* 成り確認が必要なら promotionPending を立てる */
+function tryMove(sel,x,y){
+  const p=board[sel.y][sel.x];
+  const target=board[y][x];
+
+  if(target){
+    const moverOwner=ownerOf(p);
+    const targetOwner=ownerOf(target);
+    if(moverOwner===targetOwner){
+      speak("自分の駒があるのでそこには指せません");
+      return;
+    }
+  }
+
+  if(!canMove(p,sel.x,sel.y,x,y)){
+    speak(`${readMap[displayKey(p)]}はそこには進めません`);
+    return;
+  }
+
+  const owner = ownerOf(p);
+  const inZone = (owner==="sente") ? (y<=2) : (y>=6);
+  const base = baseKey(p);
+  const canPromote = inZone && ["P","L","N","S","B","R"].includes(base) && !isPromoted(p) && !hasNoPromoteFlag(p);
+
+  if(canPromote){
+    promotionPending = { sel: {x:sel.x,y:sel.y}, to: {x,y} };
+    speak("なりますか？");
+    return;
+  }
+
+  executeMove(sel, x, y, { promote:false, declined:false });
+}
+
+/* 成る/成らない確定後に一括実行 */
+function executeMove(sel, x, y, opt){
+  const fromPiece = board[sel.y][sel.x];
+  const target = board[y][x];
+
+  if(!fromPiece){
+    selected=null;
+    render();
+    speak("駒が見つかりませんでした");
+    return;
+  }
+  if(target){
+    const moverOwner=ownerOf(fromPiece);
+    const targetOwner=ownerOf(target);
+    if(moverOwner===targetOwner){
+      selected=null;
+      render();
+      speak("自分の駒があるのでそこには指せません");
+      return;
+    }
+  }
+  if(!canMove(fromPiece, sel.x, sel.y, x, y)){
+    selected=null;
+    render();
+    speak(`${readMap[displayKey(fromPiece)]}はそこには進めません`);
+    return;
+  }
+
+  // ★人の手だけundo保存（turnがsenteのときのみ）
+  if(!(vsAI && turn==="gote")) saveUndoSnapshot();
+
+  // 取る
+  if(target){
+    const baseCaptured = baseKey(target);
+    hands[turn].push(baseCaptured);
+    if(baseCaptured==="K"){
+      winner=(turn==="sente")?"先手":"後手";
+      gameOver=true;
+      selected=null;
+      render();
+      speak(`つみです。${winner}の勝ちです`);
+      return;
+    }
+  }
+
+  const playedBy=turn;
+  const speakPieceBefore = readMap[displayKey(fromPiece)];
+
+  // 移動後の駒文字列
+  let moved = fromPiece;
+
+  let promoMsg="";
+  if(opt && opt.promote){
+    moved = "+" + stripMeta(fromPiece);
+    promoMsg = `${readMap[baseKey(fromPiece)]}が${readMap[displayKey(moved)]}になりました。`;
+  }else{
+    if(opt && opt.declined){
+      moved = addNoPromoteFlag(stripMeta(fromPiece));
+    }
+  }
+
+  board[y][x]=moved;
+  board[sel.y][sel.x]=null;
+  selected=null;
+
+  let moveText=`${coordText(x,y)}に${speakPieceBefore}を指しました。`;
+  if(target) moveText+=`${readMap[displayKey(target)]}を取りました。`;
+  if(promoMsg) moveText+=promoMsg;
+
+  turn=(turn==="sente")?"gote":"sente";
+  if(isKingInCheck(turn)) moveText+="王手です。";
+
+  lastMove={ player: playedBy, text: moveText };
+
+  if(opt && opt.declined){
+    speak(`成らないを選択しました。${moveText}次は${turn==="sente"?"せんて":"ごて"}のばんです`);
+  }else{
+    speak(`${moveText}次は${turn==="sente"?"せんて":"ごて"}のばんです`);
+  }
+  render();
+
+  // ★CPU呼び出し
+  maybeAIMove();
+}
+
+/* ========= ★CPU（A案：軽量） =========
+   - 探索深さは最大3（スマホ向け）
+   - Lvが低いほどランダム性（ノイズ）を増やす
+   - ルールの“厳密な合法手（王手放置禁止）”は未実装（軽量優先）
+*/
+const pieceValue = { P:1, L:3, N:3, S:4, G:5, B:8, R:10, K:1000 };
+
+function valueOfPiece(p){
+  if(!p) return 0;
+  const b = baseKey(p);
+  let v = pieceValue[b] || 0;
+  if(isPromoted(p)) v += 1.5;
+  return v;
+}
+
+function evaluate(side){
+  let s=0;
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p=board[y][x];
+      if(!p) continue;
+      const o=ownerOf(p);
+      const v=valueOfPiece(p);
+      s += (o===side)? v : -v;
+    }
+  }
+  for(const p of hands[side]) s += pieceValue[p]||0;
+  for(const p of hands[opposite(side)]) s -= pieceValue[p]||0;
+  return s;
+}
+
+function generateMoves(side){
+  const moves = [];
+
+  // 盤上の移動
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p = board[y][x];
+      if(!p) continue;
+      if(ownerOf(p) !== side) continue;
+
+      for(let ty=0;ty<9;ty++){
+        for(let tx=0;tx<9;tx++){
+          if(tx===x && ty===y) continue;
+          const t = board[ty][tx];
+          if(t && ownerOf(t)===side) continue;
+          if(!canMove(p,x,y,tx,ty)) continue;
+
+          const base = baseKey(p);
+          const inZone = (side==="sente") ? (ty<=2) : (ty>=6);
+          const canPromoteHere = inZone && ["P","L","N","S","B","R"].includes(base) && !isPromoted(p) && !hasNoPromoteFlag(p);
+
+          if(canPromoteHere){
+            moves.push({type:"move", from:{x,y}, to:{x:tx,y:ty}, promote:true});
+            moves.push({type:"move", from:{x,y}, to:{x:tx,y:ty}, promote:false});
+          }else{
+            moves.push({type:"move", from:{x,y}, to:{x:tx,y:ty}, promote:false});
+          }
+        }
+      }
+    }
+  }
+
+  // 持ち駒の打ち
+  for(let i=0;i<hands[side].length;i++){
+    const piece = hands[side][i];
+    for(let y=0;y<9;y++){
+      for(let x=0;x<9;x++){
+        if(board[y][x]) continue;
+        if(isDeadSquareOnDrop(piece, side, y)) continue;
+        if(piece==="P" && hasUnpromotedPawnInFile(side, x)) continue;
+        moves.push({type:"drop", piece, handIdx:i, to:{x,y}});
+      }
+    }
+  }
+
+  return moves;
+}
+
+function applyMove(m, side){
+  const snapshot = {
+    board: deepCopy(board),
+    hands: deepCopy(hands),
+    turn
+  };
+
+  if(m.type==="move"){
+    const fx=m.from.x, fy=m.from.y;
+    const tx=m.to.x, ty=m.to.y;
+    const fromPiece = board[fy][fx];
+    const target = board[ty][tx];
+
+    if(target){
+      const capBase = baseKey(target);
+      hands[side].push(capBase);
+    }
+
+    let moved = fromPiece;
+    if(m.promote){
+      moved = "+" + stripMeta(fromPiece);
+    }
+
+    board[ty][tx] = moved;
+    board[fy][fx] = null;
+  }else{
+    const tx=m.to.x, ty=m.to.y;
+    const piece = hands[side][m.handIdx];
+    hands[side].splice(m.handIdx,1);
+    const placed = (side==="sente") ? piece.toLowerCase() : piece.toUpperCase();
+    board[ty][tx] = placed;
+  }
+
+  turn = opposite(side);
+  return snapshot;
+}
+
+function undoApply(snapshot){
+  board = snapshot.board;
+  hands = snapshot.hands;
+  turn = snapshot.turn;
+}
+
+function minimax(side, depth, alpha, beta){
+  if(depth===0) return evaluate(side);
+
+  const moves = generateMoves(turn);
+  if(moves.length===0) return evaluate(side);
+
+  const maximizing = (turn===side);
+  let best = maximizing ? -1e9 : 1e9;
+
+  for(const m of moves){
+    const mover = turn;
+    const snap = applyMove(m, mover);
+    const score = minimax(side, depth-1, alpha, beta);
+    undoApply(snap);
+
+    if(maximizing){
+      if(score>best) best=score;
+      if(best>alpha) alpha=best;
+      if(beta<=alpha) break;
+    }else{
+      if(score<best) best=score;
+      if(best<beta) beta=best;
+      if(beta<=alpha) break;
+    }
+  }
+
+  return best;
+}
+
+function maybeAIMove(){
+  if(!vsAI) return;
+  if(gameOver) return;
+  if(turn !== "gote") return;
+  if(confirmAction || promotionPending) return;
+  if(aiThinking) return;
+
+  aiThinking = true;
+
+  setTimeout(()=>{
+    try{
+      doAIMove();
+    } finally {
+      aiThinking = false;
+    }
+  }, 250);
+}
+
+function doAIMove(){
+  if(gameOver) return;
+  if(turn!=="gote") return;
+
+  // ★軽量：探索深さは最大3（スマホ向け）
+  const depth = Math.min(aiLevel, 3);
+
+  const moves = generateMoves("gote");
+  if(moves.length===0){
+    speak("コンピュータは指す手がありません。");
+    return;
+  }
+
+  let bestMove = null;
+  let bestScore = -1e9;
+
+  // Lvが低いほどブレる（＝弱く感じる）
+  const noise = (6 - aiLevel) * 0.6; // 調整値：大きいほどランダム
+
+  // 速度優先：候補が多すぎる時はランダム間引き（スマホ向け）
+  let candidates = moves;
+  if(moves.length > 180){
+    // 多いときはランダムに間引く（強さが高いほど残す）
+    const keep = Math.floor(80 + aiLevel*30); // Lv1:110, Lv5:230（上限候補より大きければそのまま）
+    const shuffled = moves.slice().sort(()=>Math.random()-0.5);
+    candidates = shuffled.slice(0, Math.min(keep, shuffled.length));
+  }
+
+  for(const m of candidates){
+    const snap = applyMove(m, "gote");
+    const score = minimax("gote", depth-1, -1e9, 1e9);
+    undoApply(snap);
+
+    const noisy = score + (Math.random()*2-1)*noise;
+
+    if(noisy > bestScore){
+      bestScore = noisy;
+      bestMove = m;
+    }
+  }
+
+  if(!bestMove) bestMove = candidates[Math.floor(Math.random()*candidates.length)];
+
+  // ★CPUは「確認」や「成り確認UI」を使わず直接反映
+  if(bestMove.type==="move"){
+    const fx=bestMove.from.x, fy=bestMove.from.y;
+    const tx=bestMove.to.x, ty=bestMove.to.y;
+
+    const fromPiece = board[fy][fx];
+    const target = board[ty][tx];
+
+    // 取る
+    if(target){
+      const baseCaptured = baseKey(target);
+      hands.gote.push(baseCaptured);
+      if(baseCaptured==="K"){
+        winner="後手";
+        gameOver=true;
+        lastMove={ player:"gote", text:"王を取りました。" };
+        render();
+        speak("つみです。後手の勝ちです。");
+        return;
+      }
+    }
+
+    let moved = fromPiece;
+    if(bestMove.promote){
+      moved = "+" + stripMeta(fromPiece);
+    }
+
+    board[ty][tx]=moved;
+    board[fy][fx]=null;
+
+    const speakPieceBefore = readMap[displayKey(fromPiece)];
+    let moveText=`${coordText(tx,ty)}に${speakPieceBefore}を指しました。`;
+    if(target) moveText+=`${readMap[displayKey(target)]}を取りました。`;
+    if(bestMove.promote) moveText+=`${readMap[baseKey(fromPiece)]}が${readMap[displayKey(moved)]}になりました。`;
+
+    turn="sente";
+    if(isKingInCheck(turn)) moveText+="王手です。";
+    lastMove={ player:"gote", text: moveText };
+
+    render();
+    const head = `${coordText(tx,ty)}に${readMap[baseKey(fromPiece)]}${bestMove.promote ? "を" : "を"}${target ? "指して" : "指して"}`;
+    speak(`${coordText(tx,ty)}に${readMap[baseKey(fromPiece)]}を指しました。${target ? readMap[displayKey(target)]+"を取りました。" : ""}${bestMove.promote ? readMap[baseKey(fromPiece)]+"が"+readMap[displayKey(moved)]+"になりました。" : ""}${isKingInCheck("sente") ? "王手です。" : ""}次はせんてのばんです。`);
+
+  }else{
+    // drop
+    const x=bestMove.to.x, y=bestMove.to.y;
+    const idx=bestMove.handIdx;
+    const piece = hands.gote[idx];
+    if(!piece) return;
+
+    board[y][x] = piece.toUpperCase();
+    hands.gote.splice(idx,1);
+
+    let moveText=`${coordText(x,y)}に${readMap[piece]}を打ちました。`;
+    turn="sente";
+    if(isKingInCheck(turn)) moveText+="王手です。";
+    lastMove={ player:"gote", text: moveText };
+
+    render();
+    speak(`${coordText(x,y)}に${readMap[piece]}を打ちました。${isKingInCheck("sente") ? "王手です。" : ""}次はせんてのばんです。`);
+  }
+}
+
+/* ========= 起動 ========= */
+initNums();
+resetGame();
+setAILevel(2); // 初期レベル表示
+</script>
+</body>
+</html>
