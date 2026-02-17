@@ -996,32 +996,6 @@ function executeMove(sel, x, y, opt){
 let OPENING_BOOK = {}; // posKey -> [{m:{...}, w:number}, ...]
 let bookLoaded = false;
 
-// ===== ブック生成用：無音初期化（UI/音声に影響なし）=====
-function silentResetToStart(){
-  board=[
-    ["L","N","S","G","K","G","S","N","L"],
-    [null,"R",null,null,null,null,null,"B",null],
-    ["P","P","P","P","P","P","P","P","P"],
-    [null,null,null,null,null,null,null,null,null],
-    [null,null,null,null,null,null,null,null,null],
-    [null,null,null,null,null,null,null,null,null],
-    ["p","p","p","p","p","p","p","p","p"],
-    [null,"b",null,null,null,null,null,"r",null],
-    ["l","n","s","g","k","g","s","n","l"]
-  ];
-  hands={sente:[], gote:[]};
-  turn="sente";
-}
-
-function addBookMove(posKey, moveObj, w=1){
-  if(!OPENING_BOOK[posKey]) OPENING_BOOK[posKey]=[];
-  const list = OPENING_BOOK[posKey];
-  const s = JSON.stringify(moveObj);
-  const found = list.find(e => JSON.stringify(e.m)===s);
-  if(found) found.w += w;
-  else list.push({m: moveObj, w});
-}
-
 function applyLineMove(mv){
   // mv: {type:"move", from:{x,y}, to:{x,y}, promote:false} or {type:"drop", piece:"P", to:{x,y}}
   if(mv.type==="move"){
@@ -1130,15 +1104,23 @@ function weightedPick(list){
 
 function pickBookMoveForSide(side){
   if(!bookLoaded) return null;
+
   const key = positionKey();
   const list = OPENING_BOOK[key];
   if(!list || list.length===0) return null;
 
-  const probByLv = {1:0.20, 2:0.30, 3:0.40, 4:0.50, 5:0.60};
-  const p = probByLv[aiLevel] ?? 0.75;
+  // ★改善④：分岐が無いなら探索へ
+  if(list.length < 2) return null;
+
+  // ★改善①：book採用率を下げて探索も混ぜる
+  const probByLv = {1:0.20, 2:0.35, 3:0.50, 4:0.65, 5:0.75};
+  const p = probByLv[aiLevel] ?? 0.50;
   if(Math.random() > p) return null;
 
-  const bm = weightedPick(list);
+  // ★改善②：順番固定を防ぐ（軽いシャッフル）
+  const shuffled = list.slice().sort(()=>Math.random()-0.5);
+
+  const bm = weightedPick(shuffled);
 
   if(bm.type==="drop"){
     const idx = hands[side].indexOf(bm.piece);
@@ -1147,6 +1129,7 @@ function pickBookMoveForSide(side){
   }
   return bm;
 }
+
 
 async function loadBookJson(url="./book.json"){
   try{
@@ -1683,11 +1666,11 @@ function maybeAIMove(){
 }
 
 function aiParamsByLevel(lv){
-  if(lv<=1) return {depthMax:2, noise:1.1, timeLimit:0,   matePlies:0,  qDepth:0, useIter:false};
-  if(lv===2) return {depthMax:3, noise:0.6, timeLimit:0,   matePlies:0,  qDepth:0, useIter:false};
-  if(lv===3) return {depthMax:4, noise:0.15,timeLimit:0,   matePlies:0,  qDepth:0, useIter:false};
-  if(lv===4) return {depthMax:6, noise:0.03,timeLimit:260, matePlies:0,  qDepth:3, useIter:true};
-  return {depthMax:9, noise:0.0, timeLimit:1800, matePlies:10, qDepth:5, useIter:true};
+  if(lv<=1) return {depthMax:2, noise:1.1, timeLimit:1000,   matePlies:0,  qDepth:0, useIter:false};
+  if(lv===2) return {depthMax:3, noise:0.6, timeLimit:1000,   matePlies:0,  qDepth:0, useIter:false};
+  if(lv===3) return {depthMax:4, noise:0.15,timeLimit:1000,   matePlies:0,  qDepth:0, useIter:false};
+  if(lv===4) return {depthMax:6, noise:0.03,timeLimit:2000, matePlies:0,  qDepth:3, useIter:true};
+  return {depthMax:9, noise:0.0, timeLimit:3000, matePlies:10, qDepth:5, useIter:true};
 }
 
 /* ===== 反復深化用：指定深さで最善手 ===== */
@@ -2118,9 +2101,15 @@ function addBookMove(posKey, moveObj, w=1){
   const list = OPENING_BOOK[posKey];
   const s = JSON.stringify(moveObj);
   const found = list.find(e => JSON.stringify(e.m)===s);
-  if(found) found.w += w;
-  else list.push({m: moveObj, w});
+
+  const CAP = 10; // ★上限（好みで 8〜20）
+  if(found){
+    found.w = Math.min((found.w||1) + w, CAP); // ★改善③
+  }else{
+    list.push({m: moveObj, w: Math.min(w, CAP)});
+  }
 }
+
 
 function buildBookFromUSI(usiText, maxPlies=200){
   OPENING_BOOK = {};
@@ -2394,6 +2383,7 @@ function shouldRecordForBook(m, side){
 </script>
 </body>
 </html>
+
 
 
 
