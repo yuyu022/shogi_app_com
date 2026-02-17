@@ -196,7 +196,7 @@ body{
 <!-- ============【★バージョン記載】============= -->
 <!-- =========================================== -->
 <div id="versionLabel">
-  Ver 1.0.5（2026.02.17 21:50） 
+  Ver 1.0.6（2026.02.17 22:05） 
 </div>
 
 <div id="app">
@@ -2364,7 +2364,9 @@ function generateBigBookJsonToConsole_V2(lines=80, plies=60){
       }
 
       const key = positionKey();
-      addBookMove(key, normalizeForBook(chosen), w);
+      if(shouldRecordForBook(chosen, side)){
+        addBookMove(key, normalizeForBook(chosen), w);
+      }
 
       applyMove(chosen, side);
       ply++;
@@ -2375,6 +2377,18 @@ function generateBigBookJsonToConsole_V2(lines=80, plies=60){
 
   console.log(JSON.stringify(OPENING_BOOK));
   console.log(`✅ V2生成OK：lines=${lines}, plies=${plies}。上のJSONを book.json として保存してください。`);
+}
+
+function shouldRecordForBook(m, side){
+  const snap = applyMove(m, side);
+  const gaveCheck = isKingInCheck(opposite(side));
+  const captured = (m.type==="move" && !!m._captured);
+  const promoted = (m.type==="move" && !!m.promote);
+  const sc = evaluate(side);
+  undoApply(snap);
+
+  // どれか当てはまる時だけbookに入れる
+  return gaveCheck || captured || promoted || sc > 1.0;
 }
 
 </script>
