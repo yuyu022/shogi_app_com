@@ -196,7 +196,7 @@ body{
 <!-- ============【★バージョン記載】============= -->
 <!-- =========================================== -->
 <div id="versionLabel">
-  Ver 1.0.4（2026.02.17 21:30） 
+  Ver 1.0.4（2026.02.17 21:39） 
 </div>
 
 <div id="app">
@@ -2019,6 +2019,98 @@ function generateKakugawariSampleUSI(plies=100, depth=2, timeLimitMs=1200){
   return tokens.join(" ");
 }
 
+// ===== USI文字列を1手に変換 =====
+function usiToXY(fileChar, rankChar){
+  const file = parseInt(fileChar, 10);
+  const rank = rankChar.charCodeAt(0) - 97;
+  return { x: 9 - file, y: rank };
+}
+
+function parseUSIMove(token){
+  token = token.trim();
+  if(!token) return null;
+
+  // 打ち駒例：P*7f
+  if(token.includes("*")){
+    const piece = token[0].toUpperCase();
+    const to = usiToXY(token[2], token[3]);
+    return { type:"drop", piece, to };
+  }
+
+  // 通常移動例：7g7f または 2b3c+
+  const from = usiToXY(token[0], token[1]);
+  const to   = usiToXY(token[2], token[3]);
+  const promote = token.endsWith("+");
+
+  return { type:"move", from, to, promote };
+}
+
+// ===== 無音で合法チェックして盤に適用 =====
+function applyMoveSilentlyChecked(mv){
+  const side = turn;
+
+  // 移動
+  if(mv.type==="move"){
+    const fx=mv.from.x, fy=mv.from.y;
+    const tx=mv.to.x, ty=mv.to.y;
+
+    const piece = board[fy][fx];
+    if(!piece) throw new Error("fromに駒がありません");
+
+    if(ownerOf(piece)!==side) throw new Error("手番と一致しません");
+
+    const moveObj = {
+      type:"move",
+      from:{x:fx,y:fy},
+      to:{x:tx,y:ty},
+      promote:!!mv.promote
+    };
+
+    if(!isLegalAfter(moveObj, side)){
+      throw new Error("非合法手です");
+    }
+
+    applyMove(moveObj, side);
+    return;
+  }
+
+  // 打ち
+  if(mv.type==="drop"){
+    const idx = hands[side].indexOf(mv.piece);
+    if(idx<0) throw new Error("持ち駒がありません");
+
+    const dropObj = {
+      type:"drop",
+      piece: mv.piece,
+      handIdx: idx,
+      to: mv.to
+    };
+
+    if(!isLegalAfter(dropObj, side)){
+      throw new Error("非合法な打ちです");
+    }
+
+    applyMove(dropObj, side);
+    return;
+  }
+}
+
+// ===== 無音で初期局面に戻す =====
+function silentResetToStart(){
+  board=[
+    ["L","N","S","G","K","G","S","N","L"],
+    [null,"R",null,null,null,null,null,"B",null],
+    ["P","P","P","P","P","P","P","P","P"],
+    [null,null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null,null],
+    ["p","p","p","p","p","p","p","p","p"],
+    [null,"b",null,null,null,null,null,"r",null],
+    ["l","n","s","g","k","g","s","n","l"]
+  ];
+  hands={sente:[], gote:[]};
+  turn="sente";
+}
 
 
 </script>
