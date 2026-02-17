@@ -396,7 +396,9 @@ function undoMove(){
   selectedHand = null;
   gameOver = undoSnapshot.gameOver;
   winner = undoSnapshot.winner;
-  lastMove = undoSnapshot.lastMove ? deepCopy(lastMove) : null;
+
+  // ★修正：undoSnapshot.lastMove を復元する
+  lastMove = undoSnapshot.lastMove ? deepCopy(undoSnapshot.lastMove) : null;
 
   undoAvailable=false;
   undoSnapshot=null;
@@ -497,7 +499,10 @@ function resetGame(){
   clearPromotionPending();
 
   render();
-  speak("リセットされました。先手の番です。}
+
+  // ★修正：閉じ忘れを直す（これがないと全部止まる）
+  speak("リセットされました。先手の番です。");
+}
 
 /* ========= 描画 ========= */
 function renderHands(){
@@ -1888,6 +1893,7 @@ loadBookJson("./book.json");
 </script>
 </body>
 </html>
+
 
 
 
