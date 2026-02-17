@@ -2272,6 +2272,110 @@ function generateBigBookJsonToConsole(lines=60, plies=60){
   console.log(`✅ 生成OK：lines=${lines}, plies=${plies}。上のJSONを book.json として保存してください。`);
 }
 
+// ===== moveをbook登録用に正規化 =====
+function normalizeForBook(m){
+  if(m.type==="move"){
+    return {type:"move", from:{x:m.from.x,y:m.from.y}, to:{x:m.to.x,y:m.to.y}, promote:!!m.promote};
+  }
+  // dropは piece を必ず入れる（handIdxは入れない）
+  return {type:"drop", piece: m.piece, to:{x:m.to.x,y:m.to.y}};
+}
+
+// ===== 角換わり導入（内部moveで安全に）=====
+// ※いまはあなたの導入が「歩進め」だけなので、それをそのまま内部moveで適用
+function applyForcedIntroInternal(){
+  const introUSI = ["7g7f","3c3d","2g2f","8c8d","2f2e","8d8e"];
+  for(const tok of introUSI){
+    const mv = parseUSIMove(tok);
+    applyMoveSilentlyChecked(mv);
+  }
+}
+
+// ===== 上位候補から分岐しながら1局面ずつbookへ追加（USI不要）=====
+function generateAndRecordOneLine(plies=60, depth=2, randomness=0.45, timeLimitMs=700){
+  silentResetToStart();
+  applyForcedIntroInternal();
+
+  const deadlineMs = timeLimitMs ? (performance.now() + timeLimitMs) : null;
+
+  let ply = 0;
+  while(ply < plies){
+    const side = turn;
+
+    const moves = generateLegalMoves(side);
+    if(moves.length===0) break;
+
+    moves.sort((a,b)=> moveOrderScore(b, side) - moveOrderScore(a, side));
+    const topN = Math.max(2, Math.min(10, Math.floor(moves.length * 0.12)));
+    const pool = moves.slice(0, topN);
+
+    let chosen = pool[0];
+
+    if(Math.random() < randomness){
+      const r = Math.random();
+      const idx = Math.floor((r*r) * pool.length);
+      chosen = pool[idx];
+    }else{
+      chosen = pickBestMove(side, depth, deadlineMs) || pool[0];
+    }
+
+    // いまの局面に、この手をbookとして登録
+    const key = positionKey();
+    addBookMove(key, normalizeForBook(chosen), 1);
+
+    // 実際に進める（内部moveなので持ち駒矛盾が起きない）
+    applyMove(chosen, side);
+
+    ply++;
+    if(deadlineMs && performance.now() > deadlineMs) break;
+  }
+}
+
+// ===== 大量生成：直接OPENING_BOOKを作ってJSON出力 =====
+function generateBigBookJsonToConsole_V2(lines=80, plies=60){
+  OPENING_BOOK = {};
+
+  for(let i=0;i<lines;i++){
+    // 最初の方のラインは重みを強めにする（本命感）
+    const w = (i<10)? 5 : (i<30)? 3 : 1;
+
+    // 1ライン生成して登録（同一局面に何度も登録される＝分岐が増える）
+    silentResetToStart();
+    applyForcedIntroInternal();
+
+    const deadlineMs = performance.now() + 700;
+
+    let ply=0;
+    while(ply < plies){
+      const side = turn;
+      const moves = generateLegalMoves(side);
+      if(moves.length===0) break;
+
+      moves.sort((a,b)=> moveOrderScore(b, side) - moveOrderScore(a, side));
+      const topN = Math.max(2, Math.min(10, Math.floor(moves.length * 0.12)));
+      const pool = moves.slice(0, topN);
+
+      let chosen = pool[0];
+      if(Math.random() < 0.45){
+        const r = Math.random();
+        chosen = pool[Math.floor((r*r)*pool.length)];
+      }else{
+        chosen = pickBestMove(side, 2, deadlineMs) || pool[0];
+      }
+
+      const key = positionKey();
+      addBookMove(key, normalizeForBook(chosen), w);
+
+      applyMove(chosen, side);
+      ply++;
+
+      if(performance.now() > deadlineMs) break;
+    }
+  }
+
+  console.log(JSON.stringify(OPENING_BOOK));
+  console.log(`✅ V2生成OK：lines=${lines}, plies=${plies}。上のJSONを book.json として保存してください。`);
+}
 
 </script>
 </body>
