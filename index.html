@@ -1134,7 +1134,7 @@ function pickBookMoveForSide(side){
   const list = OPENING_BOOK[key];
   if(!list || list.length===0) return null;
 
-  const probByLv = {1:0.30, 2:0.55, 3:0.75, 4:0.88, 5:0.95};
+  const probByLv = {1:0.30, 2:0.30, 3:0.30, 4:0.30, 5:0.30};
   const p = probByLv[aiLevel] ?? 0.75;
   if(Math.random() > p) return null;
 
