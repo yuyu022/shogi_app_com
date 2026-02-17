@@ -196,7 +196,7 @@ body{
 <!-- ============【★バージョン記載】============= -->
 <!-- =========================================== -->
 <div id="versionLabel">
-  Ver 1.0.4（2026.02.17 21:42） 
+  Ver 1.0.5（2026.02.17 21:50） 
 </div>
 
 <div id="app">
@@ -2164,6 +2164,114 @@ function generateBookJsonFromUSIToConsole(usiText, maxPlies=200){
   console.log(JSON.stringify(book));
   console.log("✅ 上のJSONを book.json として保存し、index.html と同じフォルダへ置いてください。");
 }
+
+// ===== bookを追記できるようにする（上書きじゃなく追加）=====
+function appendBookFromUSI(usiText, maxPlies=200, weight=1){
+  // OPENING_BOOKが無ければ作る
+  if(!OPENING_BOOK) OPENING_BOOK = {};
+  // 局面を初期化して流す
+  silentResetToStart();
+
+  const tokens = usiText
+    .replace(/\r/g," ")
+    .replace(/\n/g," ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  let ply=0;
+  for(const t of tokens){
+    if(ply>=maxPlies) break;
+
+    const mv = parseUSIMove(t);
+    if(!mv) continue;
+
+    const key = positionKey();
+
+    let bookMv;
+    if(mv.type==="move"){
+      bookMv = {type:"move", from:mv.from, to:mv.to, promote:!!mv.promote};
+    }else{
+      bookMv = {type:"drop", piece:mv.piece, to:mv.to};
+    }
+
+    addBookMove(key, bookMv, weight);
+
+    applyMoveSilentlyChecked(mv);
+    ply++;
+  }
+}
+
+// ===== 角換わり導入 + 分岐つき自動生成 =====
+function generateBranchingUSI(plies=60, depth=2, timeLimitMs=800, randomness=0.35){
+  // 初期化
+  silentResetToStart();
+
+  // 角換わり導入（あなたが今使っている導入）
+  applyForcedKakugawariIntro();
+
+  // ここまでのUSI（導入分）を tokens にする
+  // ※導入を変えたらここも合わせてください
+  let tokens = ["7g7f","3c3d","2g2f","8c8d","2f2e","8d8e"];
+
+  const deadlineMs = timeLimitMs ? (performance.now() + timeLimitMs) : null;
+
+  while(tokens.length < plies){
+    const side = turn;
+    const moves = generateLegalMoves(side);
+    if(moves.length===0) break;
+
+    // 手並び
+    moves.sort((a,b)=> moveOrderScore(b, side) - moveOrderScore(a, side));
+
+    // ランダム分岐：上位候補から確率的に選ぶ（同じ形ばかりを防ぐ）
+    const topN = Math.max(2, Math.min(10, Math.floor(moves.length * 0.12)));
+    const pool = moves.slice(0, topN);
+
+    let chosen = pool[0];
+
+    if(Math.random() < randomness){
+      // 上位からランダム選択（上ほど出やすい）
+      // 例：0が一番出やすい分布
+      const r = Math.random();
+      const idx = Math.floor((r*r) * pool.length);
+      chosen = pool[idx];
+    }else{
+      // たまに深読みで本命を選ぶ
+      chosen = pickBestMove(side, depth, deadlineMs) || pool[0];
+    }
+
+    // USI化
+    let tok;
+    if(chosen.type==="drop"){
+      tok = moveToUSIToken({type:"drop", piece: chosen.piece, to: chosen.to});
+    }else{
+      tok = moveToUSIToken({type:"move", from: chosen.from, to: chosen.to, promote: !!chosen.promote});
+    }
+
+    applyMove(chosen, side);
+    tokens.push(tok);
+
+    if(deadlineMs && performance.now() > deadlineMs) break;
+  }
+
+  return tokens.join(" ");
+}
+
+// ===== まとめて大量生成して book.json をConsoleに出す =====
+function generateBigBookJsonToConsole(lines=60, plies=60){
+  OPENING_BOOK = {}; // いったん全消しして作り直す
+
+  for(let i=0;i<lines;i++){
+    const usi = generateBranchingUSI(plies, 2, 700, 0.45);
+    // 本命っぽい線ほど重みを高く（最初の方は重み高め）
+    const w = (i<10)? 5 : (i<30)? 3 : 1;
+    appendBookFromUSI(usi, plies, w);
+  }
+
+  console.log(JSON.stringify(OPENING_BOOK));
+  console.log(`✅ 生成OK：lines=${lines}, plies=${plies}。上のJSONを book.json として保存してください。`);
+}
+
 
 </script>
 </body>
