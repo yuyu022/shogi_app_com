@@ -836,6 +836,23 @@ function tryDrop(handSel, x, y){
   maybeAIMove();
 }
 
+/* =========================================================
+   1) 成り判定：移動元or移動先が敵陣
+   2) 強制成り
+   ※ 人側もルール整合のため同じ判定を使う
+========================================================= */
+function inPromoteZone(side, y){ return (side==="sente") ? (y<=2) : (y>=6); }
+function canPromoteByFromTo(side, fromY, toY){ return inPromoteZone(side, fromY) || inPromoteZone(side, toY); }
+function mustPromote(base, side, toY){
+  if(base==="P" || base==="L"){
+    return (side==="sente") ? (toY===0) : (toY===8);
+  }
+  if(base==="N"){
+    return (side==="sente") ? (toY<=1) : (toY>=7);
+  }
+  return false;
+}
+
 function tryMove(sel,x,y){
   const p=board[sel.y][sel.x];
   const target=board[y][x];
@@ -863,7 +880,6 @@ function tryMove(sel,x,y){
 
   if(canPromote){
     if(must){
-      // 強制成り（音声は executeMove の既存ロジックで出る）
       executeMove(sel, x, y, { promote:true, declined:false });
       return;
     }
@@ -955,12 +971,184 @@ function executeMove(sel, x, y, opt){
 }
 
 /* =========================================================
-   ★CPU強化：1〜5をすべて実装（音声出力は変更しない）
-   1) 成り判定：移動元or移動先が敵陣
-   2) 強制成り：歩/香の最終段、桂の最終段+1段手前
-   3) Quiescence（捕獲/王手の静止探索）
-   4) 玉の危険度評価（簡易）
-   5) 反復深化（Iterative Deepening）+ 時間で止める
+   定跡ブック（book.json）読み込み＆局面一致で優先
+   ※ UI/音声は変更しない（喋りは従来通りbestMoveApplyAndSpeakのみ）
+========================================================= */
+let OPENING_BOOK = {}; // posKey -> [{m:{...}, w:number}, ...]
+let bookLoaded = false;
+
+// ===== ブック生成用：無音初期化（UI/音声に影響なし）=====
+function silentResetToStart(){
+  board=[
+    ["L","N","S","G","K","G","S","N","L"],
+    [null,"R",null,null,null,null,null,"B",null],
+    ["P","P","P","P","P","P","P","P","P"],
+    [null,null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null,null],
+    ["p","p","p","p","p","p","p","p","p"],
+    [null,"b",null,null,null,null,null,"r",null],
+    ["l","n","s","g","k","g","s","n","l"]
+  ];
+  hands={sente:[], gote:[]};
+  turn="sente";
+}
+
+function addBookMove(posKey, moveObj, w=1){
+  if(!OPENING_BOOK[posKey]) OPENING_BOOK[posKey]=[];
+  const list = OPENING_BOOK[posKey];
+  const s = JSON.stringify(moveObj);
+  const found = list.find(e => JSON.stringify(e.m)===s);
+  if(found) found.w += w;
+  else list.push({m: moveObj, w});
+}
+
+function applyLineMove(mv){
+  // mv: {type:"move", from:{x,y}, to:{x,y}, promote:false} or {type:"drop", piece:"P", to:{x,y}}
+  if(mv.type==="move"){
+    const fx=mv.from.x, fy=mv.from.y;
+    const tx=mv.to.x, ty=mv.to.y;
+    const fromPiece = board[fy][fx];
+    if(!fromPiece) throw new Error("fromPiece missing");
+
+    const target = board[ty][tx];
+    if(target){
+      const capBase = baseKey(target);
+      hands[turn].push(capBase);
+    }
+
+    let moved = fromPiece;
+    if(mv.promote){
+      moved = "+" + stripMeta(fromPiece);
+    }
+    board[ty][tx]=moved;
+    board[fy][fx]=null;
+    turn = opposite(turn);
+    return;
+  }
+
+  // drop
+  const x=mv.to.x, y=mv.to.y;
+  const idx = hands[turn].indexOf(mv.piece);
+  if(idx<0) throw new Error("drop piece not in hand");
+  hands[turn].splice(idx,1);
+  board[y][x] = (turn==="sente") ? mv.piece.toLowerCase() : mv.piece.toUpperCase();
+  turn = opposite(turn);
+}
+
+function buildBookFromLines(lines){
+  OPENING_BOOK = {}; // 作り直し
+  for(const line of lines){
+    silentResetToStart();
+    for(const mv of line.moves){
+      // いまの局面をキーにして “次の手” を登録
+      const key = positionKey();
+
+      // ブック登録用に正規化（dropはhandIdxではなくpieceだけ）
+      let bookMv;
+      if(mv.type==="move"){
+        bookMv = {type:"move", from:mv.from, to:mv.to, promote:!!mv.promote};
+      }else{
+        bookMv = {type:"drop", piece:mv.piece, to:mv.to};
+      }
+
+      addBookMove(key, bookMv, 1);
+
+      // 実局面に適用（無音）
+      applyLineMove(mv);
+    }
+  }
+}
+
+// ★まず動作確認：最低限の定跡（2手だけ）
+const FAMOUS_OPENING_LINES = [
+  {
+    name: "test",
+    moves: [
+      {type:"move", from:{x:2,y:6}, to:{x:2,y:5}, promote:false}, // ▲7六歩
+      {type:"move", from:{x:6,y:2}, to:{x:6,y:3}, promote:false}  // △3四歩
+    ]
+  }
+];
+
+function generateBookJsonToConsole(){
+  buildBookFromLines(FAMOUS_OPENING_LINES);
+  // そのまま book.json に保存できる形
+  console.log(JSON.stringify(OPENING_BOOK));
+  console.log("✅ 生成OK：上のJSONを book.json として保存し、index.html と同じフォルダへ置いてください（GitHub Pages推奨）");
+}
+
+function positionKey(){
+  const rows = [];
+  for(let y=0;y<9;y++){
+    let r="";
+    for(let x=0;x<9;x++){
+      const p = board[y][x];
+      r += p ? stripMeta(p) : ".";
+      r += ",";
+    }
+    rows.push(r);
+  }
+  function handCounts(side){
+    const order=["R","B","G","S","N","L","P"];
+    const c = {R:0,B:0,G:0,S:0,N:0,L:0,P:0};
+    for(const p of hands[side]) c[p]=(c[p]||0)+1;
+    return order.map(k=>k+String(c[k]||0)).join("");
+  }
+  return `t:${turn}|b:${rows.join("/")}|hs:${handCounts("sente")}|hg:${handCounts("gote")}`;
+}
+
+function weightedPick(list){
+  let sum=0;
+  for(const e of list) sum += (e.w||1);
+  let r = Math.random()*sum;
+  for(const e of list){
+    r -= (e.w||1);
+    if(r<=0) return e.m;
+  }
+  return list[list.length-1].m;
+}
+
+function pickBookMoveForSide(side){
+  if(!bookLoaded) return null;
+  const key = positionKey();
+  const list = OPENING_BOOK[key];
+  if(!list || list.length===0) return null;
+
+  const probByLv = {1:0.30, 2:0.55, 3:0.75, 4:0.88, 5:0.95};
+  const p = probByLv[aiLevel] ?? 0.75;
+  if(Math.random() > p) return null;
+
+  const bm = weightedPick(list);
+
+  if(bm.type==="drop"){
+    const idx = hands[side].indexOf(bm.piece);
+    if(idx<0) return null;
+    return {type:"drop", piece: bm.piece, handIdx: idx, to: bm.to};
+  }
+  return bm;
+}
+
+async function loadBookJson(url="./book.json"){
+  try{
+    const res = await fetch(url, {cache:"no-store"});
+    if(!res.ok) { bookLoaded=false; return false; }
+    const obj = await res.json();
+    if(obj && typeof obj==="object"){
+      OPENING_BOOK = obj;
+      bookLoaded = true;
+      return true;
+    }
+    bookLoaded=false;
+    return false;
+  }catch(e){
+    bookLoaded=false;
+    return false;
+  }
+}
+
+/* =========================================================
+   ★CPU強化：前回の「1〜5」を完全統合（探索/静止探索/玉評価/反復深化）
 ========================================================= */
 
 const pieceValue = { P:1, L:3, N:3, S:4, G:5, B:8, R:10, K:1000 };
@@ -985,29 +1173,32 @@ function forwardBonus(p, y){
   }
 }
 
-/* ===== 1) 成り判定：移動元or移動先が敵陣 ===== */
-function inPromoteZone(side, y){
-  return (side==="sente") ? (y<=2) : (y>=6);
+/* ===== 4) 玉の危険度（簡易） ===== */
+function attackersToSquare(attackerSide, tx, ty){
+  const list = [];
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p=board[y][x];
+      if(!p) continue;
+      if(ownerOf(p)!==attackerSide) continue;
+      if(canMove(p, x, y, tx, ty)) list.push({from:{x,y}, piece:p});
+    }
+  }
+  return list;
 }
-function canPromoteByFromTo(side, fromY, toY){
-  return inPromoteZone(side, fromY) || inPromoteZone(side, toY);
+function defendersToSquare(defenderSide, tx, ty){
+  const list = [];
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const p=board[y][x];
+      if(!p) continue;
+      if(ownerOf(p)!==defenderSide) continue;
+      if(canMove(p, x, y, tx, ty)) list.push({from:{x,y}, piece:p});
+    }
+  }
+  return list;
 }
 
-/* ===== 2) 強制成り ===== */
-function mustPromote(base, side, toY){
-  if(base==="P" || base==="L"){
-    return (side==="sente") ? (toY===0) : (toY===8);
-  }
-  if(base==="N"){
-    return (side==="sente") ? (toY<=1) : (toY>=7);
-  }
-  return false;
-}
-
-/* ===== 4) 玉の危険度（簡易） =====
-   - 玉周り(8近傍)への敵の利きが多いほど減点
-   - 味方の金銀（+成駒含む金相当）で守られているほど加点
-*/
 function kingSafetyScore(side){
   const kp = findKingPos(side);
   if(!kp) return 0;
@@ -1023,11 +1214,9 @@ function kingSafetyScore(side){
       const y = kp.y + dy;
       if(x<0||x>8||y<0||y>8) continue;
 
-      // 敵の利き
       const atks = attackersToSquare(enemy, x, y);
       danger += atks.length * 1.2;
 
-      // 味方の金銀っぽい守り（盤上の実駒だけ軽く見る）
       const p = board[y][x];
       if(p && ownerOf(p)===side){
         const dk = displayKey(p);
@@ -1040,13 +1229,10 @@ function kingSafetyScore(side){
     }
   }
 
-  // さらに玉自体が王手なら危険増
   if(isKingInCheck(side)) danger += 6.0;
-
-  return cover - danger; // 大きいほど良い
+  return cover - danger;
 }
 
-/* ===== 評価関数：王手の重み増 + 玉安全度 ===== */
 function evaluate(side){
   let s=0;
   for(let y=0;y<9;y++){
@@ -1061,19 +1247,16 @@ function evaluate(side){
   for(const p of hands[side]) s += (pieceValue[p]||0) * 0.95;
   for(const p of hands[opposite(side)]) s -= (pieceValue[p]||0) * 0.95;
 
-  // 王手の重み（3〜4倍くらいに強化）
   if(isKingInCheck(opposite(side))) s += 4.0;
   if(isKingInCheck(side)) s -= 12.0;
 
-  // 玉の安全度（簡易）
   s += kingSafetyScore(side) * 0.75;
-  s -= kingSafetyScore(opposite(side)) * 0.25; // 相手玉が危険なら少し加点
+  s -= kingSafetyScore(opposite(side)) * 0.25;
 
   return s;
 }
 
 /* ========= 指し手生成 ========= */
-
 function generatePseudoMoves(side){
   const moves = [];
 
@@ -1195,39 +1378,12 @@ function generateLegalMoves(side){
   return legal;
 }
 
-function attackersToSquare(attackerSide, tx, ty){
-  const list = [];
-  for(let y=0;y<9;y++){
-    for(let x=0;x<9;x++){
-      const p=board[y][x];
-      if(!p) continue;
-      if(ownerOf(p)!==attackerSide) continue;
-      if(canMove(p, x, y, tx, ty)) list.push({from:{x,y}, piece:p});
-    }
-  }
-  return list;
-}
-
-function defendersToSquare(defenderSide, tx, ty){
-  const list = [];
-  for(let y=0;y<9;y++){
-    for(let x=0;x<9;x++){
-      const p=board[y][x];
-      if(!p) continue;
-      if(ownerOf(p)!==defenderSide) continue;
-      if(canMove(p, x, y, tx, ty)) list.push({from:{x,y}, piece:p});
-    }
-  }
-  return list;
-}
-
-/* ===== Lv5用：捕獲優先順位（既存） ===== */
+/* ===== Lv5用：捕獲優先順位 ===== */
 const capturePriorityRank = {
   "+R": 100, "+B": 95, "R": 90, "B": 80, "G": 70, "S": 60,
   "+P": 55, "+L": 55, "+N": 55, "+S": 55,
   "L": 40, "N": 35, "P": 10
 };
-
 function captureRankOfPiece(p){
   if(!p) return 0;
   const dk = displayKey(p);
@@ -1282,7 +1438,7 @@ function captureTradeBonus(m){
   return Math.max(0, capV - myV*0.15);
 }
 
-/* ====== 手並び（αβ効かせる） ====== */
+/* ====== 手並び ====== */
 function moveOrderScore(m, side){
   let score = 0;
   const inCheckBefore = isKingInCheck(side);
@@ -1296,7 +1452,6 @@ function moveOrderScore(m, side){
   if(m.type==="move" && m._captured){
     score += 10 + valueOfPiece(m._captured)*2;
   }
-
   if(aiLevel===5 && m.type==="move" && m._captured){
     const r = captureRankOfPiece(m._captured);
     score += r * 1.2;
@@ -1312,7 +1467,6 @@ function moveOrderScore(m, side){
     score -= hangingPenaltyForMove(m, side) * 0.7;
   }
 
-  // 相手手数の少なさを軽く評価（既存）
   const enemyMoves = generateLegalMoves(turn);
   if(enemyMoves.length===0){
     score += 9999;
@@ -1324,9 +1478,7 @@ function moveOrderScore(m, side){
   return score;
 }
 
-/* =========================================================
-   ★Lv5専用：詰み探索（既存思想を維持）
-========================================================= */
+/* ===== Lv5：詰み探索 ===== */
 function mateSearch(attacker, maxPlies, deadlineMs){
   if(deadlineMs && performance.now() > deadlineMs) return null;
 
@@ -1383,29 +1535,17 @@ function mateSearch(attacker, maxPlies, deadlineMs){
   return null;
 }
 
-/* =========================================================
-   3) Quiescence（捕獲/王手のみを追加で読む）
-========================================================= */
-function isTacticalMove(m, moverSide){
-  const snap = applyMove(m, moverSide);
-  const gaveCheck = isKingInCheck(opposite(moverSide));
-  const captured = (m.type==="move" && !!m._captured);
-  undoApply(snap);
-  return captured || gaveCheck;
-}
-
+/* ===== 3) Quiescence ===== */
 function generateTacticalMoves(side){
   const legal = generateLegalMoves(side);
   const t = [];
   for(const m of legal){
-    // applyMoveを二回呼ぶのを避けるため、ここで1回だけ判定して詰める
     const snap = applyMove(m, side);
     const gaveCheck = isKingInCheck(opposite(side));
     const captured = (m.type==="move" && !!m._captured);
     undoApply(snap);
     if(captured || gaveCheck) t.push(m);
   }
-  // 手並び
   t.sort((a,b)=>moveOrderScore(b, side)-moveOrderScore(a, side));
   return t;
 }
@@ -1452,21 +1592,16 @@ function quiescence(rootSide, alpha, beta, deadlineMs, qDepth){
     }
   }
 
-  // tacticalを読んだ結果が悪化することもあるのでstandPatも考慮
   if(maximizing) return Math.max(standPat, best);
   return Math.min(standPat, best);
 }
 
-/* =========================================================
-   minimax：連続王手は最大+2拡張（Lv5だけ）
-   + depth=0 では quiescence を呼ぶ（Lv4/5で効果大）
-========================================================= */
+/* ===== minimax（Lv5連続王手拡張 + quiescence）===== */
 function minimax(rootSide, depth, alpha, beta, deadlineMs, checkChain, qDepth){
   if(deadlineMs && performance.now() > deadlineMs){
     return evaluate(rootSide);
   }
   if(depth===0){
-    // Lv4/5は静止探索、他は通常評価でも良いが、ここはqDepth=0なら通常に落ちる
     if(qDepth && qDepth>0) return quiescence(rootSide, alpha, beta, deadlineMs, qDepth);
     return evaluate(rootSide);
   }
@@ -1532,14 +1667,11 @@ function aiParamsByLevel(lv){
   if(lv<=1) return {depthMax:2, noise:1.1, timeLimit:0,   matePlies:0,  qDepth:0, useIter:false};
   if(lv===2) return {depthMax:3, noise:0.6, timeLimit:0,   matePlies:0,  qDepth:0, useIter:false};
   if(lv===3) return {depthMax:4, noise:0.15,timeLimit:0,   matePlies:0,  qDepth:0, useIter:false};
-  // Lv4：時間あり + quiescence
   if(lv===4) return {depthMax:6, noise:0.03,timeLimit:260, matePlies:0,  qDepth:3, useIter:true};
-
-  // Lv5：重くてもOK + 詰み探索 + quiescence強め + 反復深化
   return {depthMax:9, noise:0.0, timeLimit:1800, matePlies:10, qDepth:5, useIter:true};
 }
 
-/* ===== 5) 反復深化：深さ1→2→…（時間で止める） ===== */
+/* ===== 反復深化用：指定深さで最善手 ===== */
 function searchBestMoveAtDepth(rootSide, depth, deadlineMs, qDepth){
   const mover = turn;
   const moves = generateLegalMoves(mover);
@@ -1559,24 +1691,24 @@ function searchBestMoveAtDepth(rootSide, depth, deadlineMs, qDepth){
     undoApply(snap);
 
     if(maximizing){
-      if(score > bestScore){
-        bestScore = score;
-        bestMove = m;
-      }
+      if(score > bestScore){ bestScore = score; bestMove = m; }
     }else{
-      if(score < bestScore){
-        bestScore = score;
-        bestMove = m;
-      }
+      if(score < bestScore){ bestScore = score; bestMove = m; }
     }
   }
-
   return {move: bestMove, score: bestScore};
 }
 
 function doAIMove(){
   if(gameOver) return;
   if(turn!=="gote") return;
+
+  // ★定跡ブック優先（UI/音声変更なし）
+  const bookMove = pickBookMoveForSide("gote");
+  if(bookMove){
+    bestMoveApplyAndSpeak(bookMove);
+    return;
+  }
 
   const {depthMax, noise, timeLimit, matePlies, qDepth, useIter} = aiParamsByLevel(aiLevel);
   const deadlineMs = timeLimit ? (performance.now() + timeLimit) : null;
@@ -1589,12 +1721,10 @@ function doAIMove(){
 
   moves.sort((a,b)=> moveOrderScore(b, "gote") - moveOrderScore(a, "gote"));
 
-  // Lv1〜3は候補間引き（既存思想）
   let candidates = moves;
   if(aiLevel<=2 && moves.length>160) candidates = moves.slice(0, aiLevel===1 ? 60 : 110);
   else if(aiLevel===3 && moves.length>260) candidates = moves.slice(0, 200);
 
-  // Lv5：取れる手が複数あるなら優先順（既存思想）
   if(aiLevel===5){
     const captureMoves = candidates.filter(m => m.type==="move");
     const scoredCaps = [];
@@ -1605,12 +1735,8 @@ function doAIMove(){
       let capRank = givesCap ? captureRankOfPiece(cap) : 0;
       const risk = hangingPenaltyForMoveLv5(m, "gote");
       undoApply(snap);
-
-      if(givesCap){
-        scoredCaps.push({m, capRank, risk});
-      }
+      if(givesCap) scoredCaps.push({m, capRank, risk});
     }
-
     if(scoredCaps.length>=2){
       scoredCaps.sort((a,b)=> (b.capRank - a.capRank) || (a.risk - b.risk));
       const top = scoredCaps[0];
@@ -1620,7 +1746,6 @@ function doAIMove(){
     }
   }
 
-  // Lv5：詰み探索（王手絡み候補から）
   if(aiLevel===5 && matePlies>0){
     for(const m of candidates){
       if(deadlineMs && performance.now() > deadlineMs) break;
@@ -1648,33 +1773,21 @@ function doAIMove(){
     }
   }
 
-  // ===== 5) 反復深化：時間のあるLv4/5はこれを優先 =====
-  // （候補間引きを反映するため、一時的に candidates を盤面側から使う簡易方式）
-  // → turnがgoteのときだけ、searchBestMoveAtDepthが全部の合法手を見るので
-  //    「候補限定」を維持したい場合は“全手探索”が強さ優先なのでそのままにしています。
   let bestMove = candidates[0];
   let bestScore = -1e9;
 
   if(useIter && deadlineMs){
     let lastGood = null;
-
     for(let d=1; d<=depthMax; d++){
       if(performance.now() > deadlineMs) break;
-
-      // 深さdで探索
       const res = searchBestMoveAtDepth("gote", d, deadlineMs, qDepth);
       if(performance.now() > deadlineMs) break;
-
-      if(res && res.move){
-        lastGood = res;
-      }
+      if(res && res.move) lastGood = res;
     }
-
     if(lastGood && lastGood.move){
       bestMove = lastGood.move;
       bestScore = lastGood.score;
     }else{
-      // 何も完走できないほど時間がない場合は1手読み相当
       const res = searchBestMoveAtDepth("gote", 1, deadlineMs, qDepth);
       if(res && res.move){
         bestMove = res.move;
@@ -1682,7 +1795,6 @@ function doAIMove(){
       }
     }
   }else{
-    // ===== 従来型：固定深さ =====
     bestMove = candidates[0];
     bestScore = -1e9;
 
@@ -1704,7 +1816,7 @@ function doAIMove(){
   bestMoveApplyAndSpeak(bestMove);
 }
 
-/* ========= 実際に反映（音声出力は既存を維持） ========= */
+/* ========= 実際に反映（CPUはUI確認なしで直接 / 音声文言は変更しない） ========= */
 function bestMoveApplyAndSpeak(bestMove){
   if(bestMove.type==="move"){
     const fx=bestMove.from.x, fy=bestMove.from.y;
@@ -1769,16 +1881,11 @@ function bestMoveApplyAndSpeak(bestMove){
 }
 
 /* ========= 起動 ========= */
-function initNums(){
-  const t=document.getElementById("topNums");
-  const r=document.getElementById("rightNums");
-  t.innerHTML=""; r.innerHTML="";
-  for(let i=9;i>=1;i--) t.innerHTML+=`<div>${i}</div>`;
-  for(let i=1;i<=9;i++) r.innerHTML+=`<div>${i}</div>`;
-}
 initNums();
 resetGame();
 setAILevel(2);
+// UI/音声には影響しない（失敗しても喋らない）
+loadBookJson("./book.json");
 </script>
 </body>
 </html>
