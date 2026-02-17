@@ -196,7 +196,7 @@ body{
 <!-- ============【★バージョン記載】============= -->
 <!-- =========================================== -->
 <div id="versionLabel">
-  Ver 1.0.3（2026.02.17 21:10） 
+  Ver 1.0.4（2026.02.17 21:30） 
 </div>
 
 <div id="app">
@@ -1905,10 +1905,125 @@ resetGame();
 setAILevel(2);
 // UI/音声には影響しない（失敗しても喋らない）
 loadBookJson("./book.json");
+
+// ===== 内部(x,y) <-> USI 変換 =====
+function xyToUSI(x,y){
+  const file = 9 - x; // 1..9
+  const rank = String.fromCharCode(97 + y); // a..i
+  return `${file}${rank}`;
+}
+function moveToUSIToken(m){
+  if(m.type==="move"){
+    const a = xyToUSI(m.from.x, m.from.y);
+    const b = xyToUSI(m.to.x, m.to.y);
+    return a + b + (m.promote?"+":"");
+  }else{
+    return `${m.piece.toUpperCase()}*${xyToUSI(m.to.x, m.to.y)}`;
+  }
+}
+
+// ===== 両者用：簡易ベストムーブ選択（合法手のみ）=====
+function pickBestMove(side, depth=2, deadlineMs=null){
+  const moves = generateLegalMoves(side);
+  if(moves.length===0) return null;
+
+  // ざっくり手並び（既存の moveOrderScore を活用）
+  moves.sort((a,b)=> moveOrderScore(b, side) - moveOrderScore(a, side));
+
+  let best = moves[0];
+  let bestScore = -1e9;
+
+  for(const m of moves){
+    if(deadlineMs && performance.now() > deadlineMs) break;
+
+    const snap = applyMove(m, side);
+    // depth-1 だけ読む（あなたの minimax を流用）
+    const sc = minimax(side, Math.max(1, depth-1), -1e9, 1e9, deadlineMs, 0);
+    undoApply(snap);
+
+    if(sc > bestScore){
+      bestScore = sc;
+      best = m;
+    }
+  }
+  return best;
+}
+
+// ===== 角換わり“導入”の固定手順（合法チェックして適用）=====
+// ※あなたの盤実装に合わない場合は途中で止まり、どの手で止まったかをconsoleに出します
+function applyForcedKakugawariIntro(){
+  const intro = [
+    "7g7f", // ▲7六歩
+    "3c3d", // △3四歩
+    "8h2b+",// ▲角交換（成り）
+    "3a2b", // △銀で角を取る
+    "2g2f", // ▲2六歩
+    "8c8d", // △8四歩
+    "2f2e", // ▲2五歩
+    "8d8e"  // △8五歩
+  ];
+
+  for(const tok of intro){
+    const mv = parseUSIMove(tok); // あなたが前に入れたUSIパーサが必要
+    if(!mv) throw new Error("USI parse failed: " + tok);
+    applyMoveSilentlyChecked(mv); // 無音で合法チェック→適用（前に入れた関数）
+  }
+}
+
+
+// ===== 角換わり“風”サンプル棋譜を自動生成（USI）=====
+// plies = 100 なら「100手番」ぶん（先手50+後手50）
+function generateKakugawariSampleUSI(plies=100, depth=2, timeLimitMs=1200){
+  // 無音初期化（あなたが追加済みの silentResetToStart が必要）
+  silentResetToStart();
+
+  // 角換わり導入を強制
+  try{
+    applyForcedKakugawariIntro();
+  }catch(e){
+    console.error("❌ 角換わり導入で失敗:", e);
+    console.error("→ このエラー文をそのまま私に貼ってください。導入手順をあなたのルールに合わせて調整します。");
+    return "";
+  }
+
+  // ここまでのUSIログを作る
+  let tokens = [
+    "7g7f","3c3d","8h2b+","3a2b","2g2f","8c8d","2f2e","8d8e"
+  ];
+
+  const deadlineMs = timeLimitMs ? (performance.now() + timeLimitMs) : null;
+
+  // すでに8ply入っているので、残りを生成
+  while(tokens.length < plies){
+    const side = turn; // 現在手番
+    const mv = pickBestMove(side, depth, deadlineMs);
+    if(!mv) break;
+
+    // 変換用に、dropのpieceを持たせる（applyMoveの後だと手駒idxが変わるので先に）
+    let tokenForThis;
+    if(mv.type==="drop"){
+      // mvは {type:"drop", piece, handIdx, to} になっているので piece はある
+      tokenForThis = moveToUSIToken({type:"drop", piece: mv.piece, to: mv.to});
+    }else{
+      tokenForThis = moveToUSIToken({type:"move", from: mv.from, to: mv.to, promote: !!mv.promote});
+    }
+
+    // 実際に適用（合法手のみなのでそのままapplyMoveでOK）
+    applyMove(mv, side);
+
+    tokens.push(tokenForThis);
+
+    if(deadlineMs && performance.now() > deadlineMs) break;
+  }
+
+  return tokens.join(" ");
+}
+
+
+
 </script>
 </body>
 </html>
-
 
 
 
