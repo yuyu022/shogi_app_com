@@ -196,7 +196,7 @@ body{
 <!-- ============【★バージョン記載】============= -->
 <!-- =========================================== -->
 <div id="versionLabel">
-  Ver 1.0.4（2026.02.17 21:39） 
+  Ver 1.0.4（2026.02.17 21:42） 
 </div>
 
 <div id="app">
@@ -2112,6 +2112,58 @@ function silentResetToStart(){
   turn="sente";
 }
 
+function addBookMove(posKey, moveObj, w=1){
+  if(!OPENING_BOOK) OPENING_BOOK = {};
+  if(!OPENING_BOOK[posKey]) OPENING_BOOK[posKey]=[];
+  const list = OPENING_BOOK[posKey];
+  const s = JSON.stringify(moveObj);
+  const found = list.find(e => JSON.stringify(e.m)===s);
+  if(found) found.w += w;
+  else list.push({m: moveObj, w});
+}
+
+function buildBookFromUSI(usiText, maxPlies=200){
+  OPENING_BOOK = {};
+  silentResetToStart();
+
+  const tokens = usiText
+    .replace(/\r/g," ")
+    .replace(/\n/g," ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  let ply=0;
+  for(const t of tokens){
+    if(ply>=maxPlies) break;
+
+    const mv = parseUSIMove(t);
+    if(!mv) continue;
+
+    const key = positionKey();
+
+    let bookMv;
+    if(mv.type==="move"){
+      bookMv = {type:"move", from:mv.from, to:mv.to, promote:!!mv.promote};
+    }else{
+      bookMv = {type:"drop", piece:mv.piece, to:mv.to};
+    }
+
+    addBookMove(key, bookMv, 1);
+
+    // 無音で合法チェックして適用
+    applyMoveSilentlyChecked(mv);
+
+    ply++;
+  }
+
+  return OPENING_BOOK;
+}
+
+function generateBookJsonFromUSIToConsole(usiText, maxPlies=200){
+  const book = buildBookFromUSI(usiText, maxPlies);
+  console.log(JSON.stringify(book));
+  console.log("✅ 上のJSONを book.json として保存し、index.html と同じフォルダへ置いてください。");
+}
 
 </script>
 </body>
